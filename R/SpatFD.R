@@ -220,7 +220,13 @@ var_names.SpatFD <- function(x) {
 
   result <- list()
 
+  # Mezclar los dos litados de coordenadas reportados
+  coords.x1  <- attr(x1, 'data')$coords
+  coords.x2  <- attr(x2, 'data')$coords
+  new_places <- setdiff(rownames(coords.x2), rownames(coords.x1))
+  coords     <- rbind(coords.x1, coords.x2[new_places, , drop = F])
 
+  # Extraer los scores
   score.x1 <- x1$scores |>
     (\(x) x[,-which(colnames(x1$scores) %in% colnames(coords))])() |>
     as.data.frame()
@@ -230,12 +236,6 @@ var_names.SpatFD <- function(x) {
 
   # Reportar en una sola tabla la varianza retenida
   result$variance <- rbind(x1$variance, x2$variance[names_x2, , drop = F])
-
-  # Mezclar los dos litados de coordenadas reportados
-  coords.x1  <- attr(x1, 'data')$coords
-  coords.x2  <- attr(x2, 'data')$coords
-  new_places <- setdiff(rownames(coords.x2), rownames(coords.x1))
-  coords     <- rbind(coords.x1, coords.x2[new_places, , drop = F])
 
   # Outer join/full join
   pts <- c(rownames(score.x1), rownames(score.x2)) |>
