@@ -30,11 +30,39 @@ Se conservarán las funcionalidades del paquete original, pero se separa la resp
 
 ## Roadmap / TODO
 
-- [ ] Definir la interfaz/API estándar entre el módulo funcional y los motores de modelamiento externos (`gstat`, `geoR`, custom).
-- [ ] Migrar las utilidades funcionales del paquete actual a la nueva arquitectura.
-- [ ] Documentación y vignettes actualizadas.
-- [ ] Validar equivalencia de resultados entre v1 y v2 para los mismos casos de uso.
-- [ ] Preparación presentación CRAN.
+### 23/Agosto
+
+- ~~Hacer el espejo de los modelos de gstat en modelos de SpatFD.~~
+- ~~Generar una función para listar y graficar todos los modelos.~~
+- ~~Generar las funciones de gstat a y la del switch para el caso de clases simples como listas~~
+- ~~Dejar un test pipeline listo para predicción.~~ 
+
+### 30/Agosto
+
+- Modificación comportamiento operador `<-`
+- Predicción univariada
+- Predicción multivariada
+
+### 6/Septiembre
+
+- Prediction methods output
+- Documentación 
+   - data inclussion 
+   - data examples inclussion
+- vignettes docs 
+
+### 13/Septiembre
+
+- Preparación exposición SpatFD - Encuentro de semilleros
+
+
+### 20/Septiembre 
+
+- Cross validation test
+
+### 27/Septiembre 
+
+- Muestreo óptimo 
 
 > Este roadmap corresponde a una fase temprana del desarrollo y cambiará conforme avance el proyecto.
 

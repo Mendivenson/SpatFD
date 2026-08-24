@@ -1,26 +1,4 @@
-compile_model <- function(
-    df = data.frame(
-      var    = c("X.PC1", "X.PC1",
-                 "X.PC2",
-                 "Y.PC1", "Y.PC1",
-                 "Y.PC2",
-                 "Y.PC2", "Y.PC2"),
-      model  = c("exponential", "nugget",
-                 "spherical",
-                 "gaussian", "nugget",
-                 "wave",
-                 "pentamodel", "nugget"),
-      rango  = c(2103.25, NA,
-                 1500,
-                 1800, NA,
-                 900,
-                 2500, NA),
-      sigma  = c(20000, 100,
-                 15000,
-                 12000, 50,
-                 8000,
-                 6000, 200))
-){
+compile_model <- function(df){
 
   # Función para fijar los argumentos de una función dada
   fix_args <- function(f, args_to_fix) {
@@ -59,11 +37,11 @@ compile_model <- function(
   all_models
 }
 
-par(mfrow = c(2,2))
-a <- compile_model()
-invisible(
-  lapply(names(a),
-       function(f){
-         curve(a[[f]](x), from = 0, to = 2000, main = f,
-                         xlab = 'h', ylab = 'variograma')})
-)
+# par(mfrow = c(2,2))
+# a <- compile_model()
+# invisible(
+#   lapply(names(a),
+#        function(f){
+#          curve(a[[f]](x), from = 0, to = 2000, main = f,
+#                          xlab = 'h', ylab = 'variograma')})
+# )
