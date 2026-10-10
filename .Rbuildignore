@@ -1,0 +1,5 @@
+^archive$
+^dev$
+^readme\.md$
+^.*\.Rproj$
+^\.Rproj\.user$

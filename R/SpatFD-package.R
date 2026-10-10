@@ -1,0 +1,76 @@
+#' SpatFD: functional geostatistics
+#'
+#' Tools for the geostatistical analysis of spatially correlated functional
+#' data. The package handles the functional side of the analysis and the
+#' spatial prediction; the variogram modelling of the scores can be done with
+#' \pkg{gstat} or with any other tool.
+#'
+#' @section Theory:
+#' The data are curves \eqn{\chi_{s_1}(t), \ldots, \chi_{s_n}(t)} observed at
+#' the sites \eqn{s_1, \ldots, s_n} of a region \eqn{D}, seen as a realisation
+#' of a functional random field \eqn{\{\chi_s(t) : s \in D,\ t \in T\}}. The
+#' goal is to predict the whole curve at an unsampled site \eqn{s_0}. The
+#' approach of Bohorquez, Giraldo and Mateu (2016, 2017) has three steps.
+#'
+#' **1. Smoothing.** Each curve is observed only at a finite set of points, so
+#' it is first written in terms of \eqn{p} known basis functions
+#' \eqn{B_1(t), \ldots, B_p(t)}:
+#' \deqn{\chi_{s_i}(t) \approx \sum_{l=1}^{p} c_{il} B_l(t)}
+#' The coefficients are estimated by penalised least squares, where the
+#' smoothing parameter \eqn{\lambda} controls how rough the curves are allowed
+#' to be (Ramsay and Silverman, 2005).
+#'
+#' **2. Functional principal components.** By the Karhunen-Loève expansion,
+#' the curves are represented with a few orthonormal eigenfunctions
+#' \eqn{\xi_1(t), \ldots, \xi_K(t)} of their covariance operator:
+#' \deqn{\chi_s(t) \approx \mu(t) + \sum_{k=1}^{K} f_k(s) \xi_k(t)}
+#' The eigenfunctions do not depend on the site. All the spatial information
+#' is carried by the scores \eqn{f_k(s)}, which are ordinary scalar random
+#' fields.
+#'
+#' **3. Spatial modelling of the scores.** Because the eigenfunctions are
+#' orthonormal, the spatial dependence between curves is determined by the
+#' spatial dependence of the scores. In particular the trace-variogram of the
+#' curves (Giraldo, Delicado and Mateu, 2011) is the sum of the variograms of
+#' the scores:
+#' \deqn{\frac{1}{2} E \| \chi_{s+h} - \chi_s \|^2 = \sum_{k=1}^{K} \gamma_k(h)}
+#' So the problem reduces to classical geostatistics: fit variogram models to
+#' the scores, predict them at \eqn{s_0} by kriging or cokriging, and rebuild
+#' the curve as
+#' \eqn{\hat{\chi}_{s_0}(t) = \mu(t) + \sum_{k} \hat{f}_k(s_0) \xi_k(t)}.
+#' With several functional variables, the scores of all of them are modelled
+#' jointly through their cross-variograms (Bohorquez, Giraldo and Mateu, 2017).
+#'
+#' @section Workflow:
+#' \tabular{ll}{
+#'   Steps 1 and 2 \tab [spatfd()], and [`+.SpatFD`] to combine variables \cr
+#'   Export the scores \tab [togstat()] \cr
+#'   Step 3, outside the package \tab e.g. [gstat::variogram()],
+#'     [gstat::fit.variogram()], [gstat::fit.lmc()] \cr
+#'   Bring the fitted models back \tab [toSpatFD()] and [add_model()] \cr
+#'   Predict the curves at new sites \tab [predict()][predict.SpatFD]
+#' }
+#'
+#' @references
+#' Bohorquez, M., Giraldo, R. and Mateu, J. (2016). Optimal sampling for
+#' spatial prediction of functional data. *Statistical Methods &
+#' Applications*, 25(1), 39-54. \doi{10.1007/s10260-015-0340-9}
+#'
+#' Bohorquez, M., Giraldo, R. and Mateu, J. (2017). Multivariate functional
+#' random fields: prediction and optimal sampling. *Stochastic Environmental
+#' Research and Risk Assessment*, 31, 53-70. \doi{10.1007/s00477-016-1266-y}
+#'
+#' Bohorquez, M., Giraldo, R. and Mateu, J. (2021). Spatial prediction and
+#' optimal sampling of functional data. In J. Mateu and R. Giraldo (eds.),
+#' *Geostatistical Functional Data Analysis*. John Wiley & Sons.
+#' \doi{10.1002/9781119387916}
+#'
+#' Giraldo, R., Delicado, P. and Mateu, J. (2011). Ordinary kriging for
+#' function-valued spatial data. *Environmental and Ecological Statistics*,
+#' 18, 411-426. \doi{10.1007/s10651-010-0143-y}
+#'
+#' Ramsay, J. O. and Silverman, B. W. (2005). *Functional Data Analysis*
+#' (2nd ed.). Springer. \doi{10.1007/b98888}
+#'
+#' @keywords internal
+"_PACKAGE"

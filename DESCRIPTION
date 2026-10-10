@@ -1,0 +1,85 @@
+Package: SpatFD
+Type: Package
+Title: Functional Geostatistics: Univariate and Multivariate Functional Spatial Prediction
+Version: 0.0.1.9000
+Authors@R: c(person(given = c("Martha","Patricia"),
+       family = "Bohorquez Castañeda",
+       role = c("aut","cre"),
+       email = "mpbohorquezc@unal.edu.co"),
+       person(given = c("Diego","Alejandro"),
+       family = "Sandoval Skinner",
+       role = c("aut"),
+       email = "diasandovalsk@unal.edu.co"),
+       person(given = "Angie",
+       family = "Villamil",
+       role = c("aut"),
+       email = "acvillamils@unal.edu.co"),
+       person(given = c("Samuel","Hernando"),
+       family = "Sanchez Gutierrez",
+       role = c("aut"),
+       email = "ssanchezgu@unal.edu.co"),
+       person(given = "Nathaly",
+       family = "Vergel Serrano",
+       role = c("ctb"),
+       email = "nvergel@unal.edu.co"),
+       person(given = c("Miguel","Angel"),
+       family = "Munoz Layton",
+       role = c("ctb"),
+       email = "mmunozl@unal.edu.co"),
+       person(given = "Valeria",
+       family = "Bejarano Salcedo",
+       role = c("ctb"),
+       email = "vbejaranos@unal.edu.co"),
+       person(given = c("Venus","Celeste"),
+       family = "Puertas",
+       role = c("ctb"),
+       email = "vpuertasg@unal.edu.co"),
+       person(given = c("Ruben","Dario"),
+       family = "Guevara Gonzalez",
+       role = c("aut"),
+       email = "rdguevarag@unal.edu.co"),
+       person(given = c("Joan","Nicolas"),
+       family = "Castro Cortes",
+       role = c("ctb"),
+       email = "jocastroc@unal.edu.co"),
+       person(given = "Ramon",
+       family = "Giraldo Henao",
+       role = c("aut"),
+       email = "rgiraldoh@unal.edu.co"),
+       person(given = "Jorge",
+       family = "Mateu",
+       role = c("aut"),
+       email = "mateu@mat.uji.es"),
+       person(given = "Mendivenson",
+       family = "Barragán Zabala",
+       role = c("aut"),
+       email = "mbarraganz@unal.edu.co")
+       )
+Description: Functional data handling for functional geostatistics. Observed
+    curves are smoothed and represented through their empirical functional
+    principal components, so that spatial prediction of curves reduces to
+    the spatial modelling of the score components. The geostatistical
+    modelling of the scores is decoupled from the package: scores can be
+    exported to 'gstat', and fitted variogram models can be translated back
+    into a common representation. References: Bohorquez, M., Giraldo, R.,
+    and Mateu, J. (2016) <doi:10.1007/s10260-015-0340-9>, Bohorquez, M.,
+    Giraldo, R., and Mateu, J. (2016) <doi:10.1007/s00477-016-1266-y>,
+    Bohorquez M., Giraldo R. and Mateu J. (2021) <doi:10.1002/9781119387916>.
+License: GPL-3
+Encoding: UTF-8
+Depends:
+    R (>= 4.1.0)
+Imports:
+    fda,
+    graphics,
+    gstat,
+    knitr,
+    sp,
+    stats,
+    stringr,
+    utils
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
