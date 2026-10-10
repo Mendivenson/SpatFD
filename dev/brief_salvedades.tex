@@ -1,0 +1,214 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{hyperref}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\emergencystretch=2em   % Evita que los nombres en \texttt se salgan del margen
+
+\title{SpatFD v2: salvedades de la implementación}
+\author{Brief técnico del \emph{pipeline} del paquete}
+\date{Octubre de 2026}
+
+\begin{document}
+\maketitle
+
+\noindent
+Este documento resume las principales salvedades de la implementación actual
+de SpatFD v2. No discute los métodos estadísticos en sí, sino las decisiones
+del \emph{pipeline} del paquete: cómo se suaviza, cómo se hace el análisis de
+componentes principales funcionales, cómo se traen los modelos de variograma
+y, sobre todo, cómo se predice. Cada punto indica qué hace hoy el código y por
+qué conviene tenerlo presente.
+
+\section{Flujo del paquete}
+
+El flujo completo tiene cuatro pasos:
+\begin{enumerate}
+  \item \code{spatfd()}: suavizamiento de las curvas y análisis de componentes
+        principales funcionales (FPCA).
+  \item \code{togstat()}: exportación de los \emph{scores} para estimar y
+        ajustar variogramas por fuera del paquete.
+  \item \code{add\_model()}: traducción, compilación y registro de los modelos
+        ajustados dentro del objeto.
+  \item \code{predict()}: predicción de las curvas en sitios nuevos o sobre un
+        mapa, con los métodos \code{scores} y \code{lambda}.
+\end{enumerate}
+La predicción ya no depende de \code{gstat}: los sistemas se resuelven de
+forma matricial dentro del paquete. Tanto el método \code{scores} como el
+método \code{lambda} reproducen los resultados de la versión CRAN (0.0.1) con
+diferencias relativas del orden de $10^{-16}$.
+
+\section{Suavizamiento}
+
+\begin{itemize}
+  \item \textbf{Operador de penalización.} Se define con
+        \code{vec2Lfd(c(1, ncol(dat)))}, heredado de la versión CRAN. Con $n$
+        estaciones el operador es
+        \[
+          L\chi = D^2\chi + n\,D\chi + \chi ,
+        \]
+        de modo que la penalización depende del número de estaciones. No hay
+        una justificación evidente para ello y cambia el suavizamiento cuando
+        se agregan o quitan sitios.
+  \item \textbf{Parámetros fijos.} El parámetro de suavizamiento
+        \code{lambda} y el número de bases \code{nbasis} los elige el usuario
+        y son los mismos para todas las curvas. No hay selección automática,
+        por ejemplo por validación cruzada generalizada.
+  \item \textbf{Datos faltantes.} No se revisan valores faltantes en los
+        datos; la versión CRAN sí lo hacía.
+\end{itemize}
+
+\section{Componentes principales funcionales}
+
+\begin{itemize}
+  \item \textbf{Media constante en el espacio.} La función media $\mu(t)$ es
+        el promedio simple de las curvas de las estaciones, sin considerar su
+        ubicación. Todo lo que sigue supone que la media no cambia en el
+        espacio.
+  \item \textbf{Dependencia del número de componentes.} Los \emph{scores}
+        cambian ligeramente, en el cuarto decimal, según cuántos componentes
+        se pidan, por la integración numérica de \code{fda}. Por eso, cuando
+        se selecciona el número de componentes por varianza explicada, el
+        análisis se repite en lugar de recortarse.
+  \item \textbf{Un FPCA por variable.} Cada variable funcional tiene su
+        propio análisis; no hay un análisis conjunto entre variables.
+\end{itemize}
+
+\section{Modelamiento de los variogramas}
+
+\begin{itemize}
+  \item \textbf{Pocas estaciones.} Con pocas estaciones (13 para PM10 en los
+        datos de México) los variogramas empíricos son muy inestables. En el
+        ejemplo de demostración el ajuste de los variogramas de PM10 no
+        converge.
+  \item \textbf{Meseta frente a valor propio.} Nada obliga a que la meseta
+        del modelo ajustado se parezca al valor propio del componente, que es
+        la varianza empírica del \emph{score}. La diferencia entre ambos
+        afecta directamente la varianza de predicción.
+  \item \textbf{Traducción desde gstat.} \code{toSpatFD()} solo conserva el
+        modelo, el rango, la meseta parcial y el parámetro \code{kappa}. La
+        anisotropía se descarta sin aviso, y un modelo \code{Lin} con rango se
+        traduce como lineal no acotado.
+  \item \textbf{Modelos que no coinciden con gstat.} Seis modelos espejo
+        (\code{circular}, \code{bessel}, \code{pentamodel},
+        \code{logarithmic}, \code{spline} y \code{legendre}) no reproducen a
+        \code{gstat}. Predecir con ellos da resultados distintos sin aviso.
+  \item \textbf{Un solo traductor.} Solo se pueden traer modelos ajustados con
+        \code{gstat}.
+\end{itemize}
+
+\section{Predicción}
+
+\subsection{Aspectos comunes a los dos métodos}
+
+\begin{itemize}
+  \item \textbf{Kriging simple con media cero.} Las covarianzas se obtienen de
+        los variogramas como $C(h) = C(0) - \gamma(h)$, con $C(0)$ la suma de
+        las mesetas parciales. Esto descansa en que los \emph{scores} sean
+        estacionarios y centrados.
+  \item \textbf{Modelos sin meseta.} Los modelos \code{linear}, \code{power}
+        y \code{logarithmic} no tienen covarianza y no se pueden usar hasta
+        que exista kriging ordinario.
+  \item \textbf{Distancias euclidianas.} Las distancias se calculan sobre las
+        coordenadas tal como vienen. Sirven para coordenadas proyectadas, no
+        para longitud y latitud.
+  \item \textbf{Vecindario global.} Se factoriza una matriz densa con todos
+        los sitios observados, lo que escala mal cuando hay muchos sitios. No
+        hay kriging por vecindarios.
+  \item \textbf{Validez del modelo.} Solo se detecta un modelo inválido si la
+        factorización de Cholesky falla. Un modelo que no sea válido puede
+        pasar sin error.
+  \item \textbf{Efecto pepita.} Se trata como en \code{gstat}: el variograma
+        vale cero en el origen y la predicción en un sitio observado devuelve
+        el valor observado.
+\end{itemize}
+
+\subsection{Método \code{scores}}
+
+Cada \emph{score} se predice por kriging simple y la curva se reconstruye:
+\[
+  \hat f_k(s_0) = c_0^{T}\,\Sigma^{-1} f,
+  \qquad
+  \hat\chi_{s_0}(t) = \mu(t) + \sum_{k=1}^{K} \hat f_k(s_0)\,\xi_k(t).
+\]
+\begin{itemize}
+  \item \textbf{Independencia entre scores.} Los \emph{scores} de una misma
+        variable se tratan como independientes salvo que el modelo traiga
+        variogramas cruzados. El FPCA solo garantiza que no estén
+        correlacionados en un mismo sitio, no a distancia.
+  \item \textbf{Truncamiento.} La curva se reconstruye con los $K$ componentes
+        retenidos, y la varianza reportada, $\sum_k \sigma_k^2(s_0)$, ignora la
+        variabilidad de los componentes que quedaron por fuera.
+  \item \textbf{Un solo sistema.} Los casos univariado y multivariado pasan
+        por el mismo \emph{solver} por bloques. Los \emph{scores} que no están
+        conectados por variogramas cruzados se resuelven por aparte.
+\end{itemize}
+
+\subsection{Método \code{lambda}}
+
+Se implementó igual que en la versión CRAN, por decisión explícita, para
+permitir la comparación directa:
+\[
+  \hat\chi_{s_0}(t) = \sum_{i=1}^{n} \lambda_i\,\chi_{s_i}(t),
+  \qquad
+  \Omega\,\lambda = c,
+  \qquad
+  \Omega = \sum_{k=1}^{K}\Omega_k,\quad c = \sum_{k=1}^{K} c_k ,
+\]
+con varianza de predicción
+\[
+  \sum_{k=1}^{K}\left(\eta_k - 2\,c_k^{T}\lambda + \lambda^{T}\Omega_k\lambda\right),
+\]
+donde $\eta_k$ es el valor propio del componente $k$.
+\begin{itemize}
+  \item \textbf{Curvas sin centrar.} Los pesos son de kriging simple y no
+        suman uno, pero se aplican a las curvas observadas sin restarles la
+        media. La predicción se encoge hacia cero y no hacia la media: en PM10
+        las curvas predichas quedan muy por debajo de las observadas. La
+        versión coherente sería
+        \[
+          \hat\chi_{s_0}(t) = \mu(t) + \sum_{i=1}^{n}\lambda_i
+          \bigl(\chi_{s_i}(t) - \mu(t)\bigr),
+        \]
+        y el lugar donde hacer el cambio está marcado en el código de
+        \code{predict\_lambda()}.
+  \item \textbf{Varianza con el valor propio.} La varianza mezcla el valor
+        propio $\eta_k$ con las covarianzas del modelo ajustado. Si la meseta
+        y el valor propio difieren mucho puede salir negativa, y no hay aviso.
+  \item \textbf{No comparable con \code{scores}.} Por las dos razones
+        anteriores, ni las curvas ni las varianzas del método \code{lambda}
+        son comparables hoy con las del método \code{scores}.
+  \item \textbf{Solo univariado.} Si el modelo tiene variogramas cruzados o se
+        pide más de una variable, la función se detiene con un error.
+\end{itemize}
+
+\section{Objeto y registro de modelos}
+
+\begin{itemize}
+  \item \textbf{Registro en el sitio.} \code{add\_model()} modifica el objeto
+        sin reasignarlo. Una copia hecha con \code{\textless-} comparte los modelos
+        del objeto original.
+  \item \textbf{Identificadores de variogramas cruzados.} Se arman uniendo los
+        nombres de los \emph{scores} con un punto. Nombres de variable que
+        contengan puntos pueden volverse ambiguos.
+  \item \textbf{Mapas.} Al predecir sobre un mapa no se revisa ni se
+        transforma el sistema de coordenadas: debe ser el mismo de las
+        estaciones. El mapa de predicción muestra un solo instante.
+\end{itemize}
+
+\section{Pendientes}
+
+\begin{itemize}
+  \item Validación cruzada dejando un sitio por fuera, que es la herramienta
+        prevista para comparar modelos y métodos.
+  \item Kriging ordinario, necesario para los modelos sin meseta.
+  \item Método \code{lambda} centrado y su extensión multivariada.
+  \item Corregir los seis modelos espejo que no coinciden con \code{gstat}.
+\end{itemize}
+
+\end{document}

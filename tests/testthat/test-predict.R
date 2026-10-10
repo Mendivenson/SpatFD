@@ -113,6 +113,11 @@ test_that("curves are rebuilt from the predicted scores", {
   expected <- fda::eval.fd(t, pca$harmonics) %*% t(krige_scores(a, new, model = "single")$pred)
   expected <- expected + as.vector(fda::eval.fd(t, pca$meanfd))
 
+  # Queda registrado cómo se predijo
+  expect_equal(attr(pred, "method"), "scores")
+  expect_false(attr(pred, "crossed"))
+  expect_true(attr(predict(ab, new, model = "lmc"), "crossed"))
+
   # Siempre una lista por variable con las curvas (pred) y su varianza (var)
   expect_s3_class(pred, "SpatFDpred")
   expect_named(pred, "a")
@@ -134,7 +139,6 @@ test_that("predict() validates its arguments", {
   expect_equal(predict(sfd, new)$a$pred$coefs, predict(sfd, new, model = "single")$a$pred$coefs)
 
   expect_error(predict(sfd, new, variable = "z"), "Variables not found")
-  expect_error(predict(sfd, new, method = "lambda"), "not available yet")
   expect_error(predict(sfd, new, method = c("scores", "lambda")), "must be a single string")
   expect_error(predict(sfd, new[, "x", drop = FALSE]), "must have the coordinates of the object")
 
@@ -223,4 +227,101 @@ test_that("models are kept when objects are combined", {
 
 test_that("the nugget variogram is zero at the origin", {
   expect_equal(models$nugget(c(0, 1, 5), sigma = 2), c(0, 2, 2))
+})
+
+test_that("predictions are plotted over the observed curves", {
+  pred <- predict(a, new, model = "single")
+
+  grDevices::pdf(NULL)
+  expect_invisible(plot(pred))
+  expect_no_error(plot(pred, variable = "a", col = "red", lwd = 2))
+  grDevices::dev.off()
+
+  expect_error(plot(pred, variable = "z"), "was not predicted")
+  expect_error(plot(pred, mode = "other"), "'mode' must be")
+  expect_error(plot(pred, mode = "map"), "only available for predictions made over a map")
+})
+
+test_that("a map is predicted on a regular grid and drawn as two maps", {
+  skip_if_not_installed("sf")
+  square <- sf::st_sfc(sf::st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 1), c(0, 0)))))
+
+  # Sin dibujar: devuelve la predicción en cerca de n puntos dentro del mapa
+  pred <- predict(a, square, model = "single", n = 100, plot = FALSE)
+  grid <- attr(pred, "newcoords")
+
+  expect_s3_class(pred, "SpatFDpred")
+  expect_equal(nrow(grid), 100, tolerance = 0.2)
+  expect_equal(colnames(grid), c("x", "y"))
+  expect_true(all(grid >= 0 & grid <= 1))
+  expect_length(pred$a$var, nrow(grid))
+  expect_equal(ncol(pred$a$pred$coefs), nrow(grid))
+
+  # Es la misma predicción que se obtiene dando esos puntos directamente
+  direct <- predict(a, grid, model = "single")
+  expect_equal(pred$a$pred$coefs, direct$a$pred$coefs)
+  expect_equal(pred$a$var, direct$a$var)
+
+  grDevices::pdf(NULL)
+  expect_invisible(predict(a, square, model = "single", n = 100))    # dibuja los mapas
+  expect_no_error(plot(pred, time = 25))
+  expect_no_error(plot(pred, time = 25, main = "My title"))
+  expect_no_error(plot(pred, mode = "curves"))
+  expect_no_error(plot(pred, mode = "map", col = grDevices::heat.colors(20)))
+  grDevices::dev.off()
+
+  expect_error(plot(pred, time = 1000), "'time' must be a single value within the range")
+  expect_error(predict(a, square, model = "single", n = -1), "'n' must be a single positive number")
+})
+
+test_that("the lambda method reproduces the predictor of the CRAN version", {
+  pred <- predict(a, new, model = "single", method = "lambda")
+
+  expect_equal(attr(pred, "method"), "lambda")
+  expect_false(attr(pred, "crossed"))
+  expect_named(pred, "a")
+  expect_named(pred$a, c("pred", "var"))
+
+  # Referencia: las fórmulas de la versión CRAN, con las covarianzas de gstat
+  places <- a$scores[, c("x", "y")]
+  d      <- as.matrix(dist(rbind(places, new)))
+  d_obs  <- d[seq_len(nrow(places)), seq_len(nrow(places))]
+  d_new  <- d[-seq_len(nrow(places)), seq_len(nrow(places)), drop = FALSE]
+
+  covariance <- function(m, d) gstat::variogramLine(m, dist_vector = d, covariance = TRUE)
+  Omega <- lapply(fitted, covariance, d = d_obs)
+  C0    <- lapply(fitted, covariance, d = d_new)
+
+  lambda   <- solve(Reduce(`+`, Omega)) %*% t(Reduce(`+`, C0))
+  values   <- attr(a, "pca")$a$values
+  variance <- Reduce(`+`, lapply(1:2, function(k) {
+    values[k] - 2 * diag(C0[[k]] %*% lambda) + diag(t(lambda) %*% Omega[[k]] %*% lambda)
+  }))
+
+  expect_equal(unname(pred$a$pred$coefs),
+               unname(attr(a, "fd")$a$coefs[, rownames(places)] %*% lambda))
+  expect_equal(unname(pred$a$var), unname(variance))
+  expect_equal(colnames(pred$a$pred$coefs), rownames(new))
+})
+
+test_that("the lambda method only accepts univariate models", {
+  x <- spatfd(sim_data(sites, 1), coords, basis = "fourier", nbasis = 11, nharm = 2, name = "a")
+  y <- spatfd(sim_data(sites[1:8], 2), coords, basis = "fourier", nbasis = 11, nharm = 1, name = "b")
+  xy <- x + y
+
+  both <- c(fitted, list(b.PC1 = gstat::vgm(20, "Exp", 0.5)))
+  add_model(xy, both, name = "direct")
+
+  crossed <- toSpatFD(both)
+  crossed <- rbind(crossed, transform(crossed[crossed$var == "b.PC1", ], var = "a.PC1.b.PC1", sigma = 1))
+  add_model(xy, crossed, name = "crossed")
+
+  # Varias variables: hay que escoger una
+  expect_error(predict(xy, new, model = "direct", method = "lambda"),
+               "only predicts one variable.*Choose one variable.*direct")
+  expect_named(predict(xy, new, model = "direct", method = "lambda", variable = "b"), "b")
+
+  # Modelos con variogramas cruzados: error, aunque se pida una sola variable
+  expect_error(predict(xy, new, model = "crossed", method = "lambda", variable = "a"),
+               "has cross-variograms")
 })

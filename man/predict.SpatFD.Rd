@@ -11,6 +11,8 @@
   model = NULL,
   variable = NULL,
   method = "scores",
+  n = 5000,
+  plot = TRUE,
   ...
 )
 
@@ -22,7 +24,12 @@
 \item{newcoords}{Numeric matrix or data frame with the coordinates of the
 prediction sites, one row per site. Its columns must be the coordinates
 of \code{object}, matched by name when it has column names and by position
-otherwise. Row names, if any, identify the predicted curves.}
+otherwise. Row names, if any, identify the predicted curves.
+
+It can also be a map, an \code{sf} or \code{sfc} object of the \pkg{sf} package
+with polygons in the same coordinate system as the sites of \code{object}. The
+curves are then predicted on a regular grid of points inside the map, see
+\code{n}.}
 
 \item{model}{Name of one of the models registered in \code{object} with
 \code{\link[=add_model]{add_model()}}; \code{object$models} lists them. It can be omitted when
@@ -34,8 +41,15 @@ are optional, see Details.}
 predict. Defaults to all the variables covered by the model. With
 several variables their scores are predicted jointly.}
 
-\item{method}{Prediction method, a single one per call. Only \code{"scores"} is
-available for now.}
+\item{method}{Prediction method, a single one per call: \code{"scores"} (the
+default) or \code{"lambda"}. See Details and Theory.}
+
+\item{n}{Only when \code{newcoords} is a map: approximate number of points of
+the grid on which the curves are predicted.}
+
+\item{plot}{Only when \code{newcoords} is a map: if \code{TRUE} (the default), the
+maps of the prediction and of its variance are drawn side by side, see
+\code{\link[=plot.SpatFDpred]{plot.SpatFDpred()}}.}
 
 \item{...}{Ignored.}
 
@@ -52,13 +66,18 @@ the sum of the prediction variances of its scores.}
 }
 The list always has this form, also when a single variable is predicted.
 The coordinates of the prediction sites are kept in the attribute
-\code{newcoords}.
+\code{newcoords}. When the prediction is made over a map and the maps are
+drawn, the object is returned invisibly.
+
+The predictions can be plotted with \link[=plot.SpatFDpred]{plot()}.
 }
 \description{
 Predicts the curves of one or several functional variables at unsampled
-sites. The scores of the principal components are predicted by simple
-kriging (or simple cokriging) and the curves are rebuilt from them. The
-kriging system is solved inside the package, in matrix form.
+sites. With the default method, the scores of the principal components are
+predicted by simple kriging (or simple cokriging) and the curves are rebuilt
+from them; with the method \code{"lambda"}, the curves are predicted as a linear
+combination of the observed curves. The systems are solved inside the
+package, in matrix form.
 }
 \details{
 The model defines the system that is solved. Two scores are predicted
@@ -73,6 +92,18 @@ table of the models of the object.
 
 Simple kriging works with covariances, so every model must have a sill:
 \code{linear}, \code{power}, \code{logarithmic}, \code{spline} and \code{legendre} cannot be used.
+
+The method \code{"lambda"} reproduces the predictor of the CRAN version of the
+package and has, for now, these limitations:
+\itemize{
+\item It predicts a single variable with a model without cross-variograms; any
+other case is an error.
+\item The weights are applied to the observed curves as they are, without
+removing their mean first.
+\item The variance of each score is taken from the eigenvalue of its principal
+component, not from the sill of the fitted model, so the prediction
+variance can be negative when the two differ much.
+}
 }
 \section{Theory}{
 
@@ -93,6 +124,21 @@ is then rebuilt as (Bohorquez, Giraldo and Mateu, 2016, 2017)
 \deqn{\hat{\chi}_{s_0}(t) = \mu(t) + \sum_{k=1}^{K} \hat{f}_k(s_0) \xi_k(t)}
 Because the eigenfunctions are orthonormal, the sum of the prediction
 variances of the scores measures the uncertainty of the whole curve.
+
+The method \code{"lambda"} predicts the curve directly as a linear combination
+of the observed curves, with one scalar weight per observed site (Giraldo,
+Delicado and Mateu, 2011):
+\deqn{\hat{\chi}_{s_0}(t) = \sum_{i=1}^{n} \lambda_i \chi_{s_i}(t)}
+The weights minimise \eqn{E \| \chi_{s_0} - \hat{\chi}_{s_0} \|^2} and
+solve \eqn{\Omega \lambda = c}, where \eqn{\Omega = \sum_k \Omega_k} and
+\eqn{c = \sum_k c_k} add up, over the scores, the covariance matrices
+between observed sites and the covariances with \eqn{s_0}. The prediction
+variance is
+\deqn{\sum_{k=1}^{K} \left( \eta_k - 2 c_k^T \lambda +
+  \lambda^T \Omega_k \lambda \right)}
+with \eqn{\eta_k} the eigenvalue of the \eqn{k}-th principal component.
+Unlike the method \code{"scores"}, the same weights are used for all the scores
+and the curves are not truncated to the first \eqn{K} components.
 }
 
 \examples{
@@ -114,8 +160,13 @@ sfd$models
 
 pred <- predict(sfd, newcoords = cbind(x = c(0.2, 0.7), y = c(0.5, 0.5)), model = "exponential")
 pred
-plot(pred$sim$pred)
 pred$sim$var
+plot(pred)
+
+# The same prediction with the method lambda
+pred_lambda <- predict(sfd, newcoords = cbind(x = c(0.2, 0.7), y = c(0.5, 0.5)),
+                       model = "exponential", method = "lambda")
+plot(pred_lambda)
 
 }
 \references{
@@ -129,7 +180,12 @@ Research and Risk Assessment}, 31, 53-70. \doi{10.1007/s00477-016-1266-y}
 
 Chilès, J.-P. and Delfiner, P. (2012). \emph{Geostatistics: Modeling Spatial
 Uncertainty} (2nd ed.). John Wiley & Sons. \doi{10.1002/9781118136188}
+
+Giraldo, R., Delicado, P. and Mateu, J. (2011). Ordinary kriging for
+function-valued spatial data. \emph{Environmental and Ecological Statistics},
+18, 411-426. \doi{10.1007/s10651-010-0143-y}
 }
 \seealso{
-\code{\link[=add_model]{add_model()}} to register models in the object.
+\code{\link[=add_model]{add_model()}} to register models in the object, and
+\code{\link[=plot.SpatFDpred]{plot.SpatFDpred()}} to plot the predictions.
 }

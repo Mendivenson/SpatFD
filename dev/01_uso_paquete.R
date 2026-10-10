@@ -9,10 +9,9 @@
 #   4. Agregar los modelos ajustados al objeto
 #   5. Predicción en sitios nuevos
 #   6. Resultados
+#   7. Predicción sobre un mapa
 #
 # La comprobación de que los resultados coinciden con gstat está en dev/02_comparacion_gstat.R
-
-library(gstat)
 
 # --------------------------------------------------------------------------------------------------
 #                                          1. DATOS
@@ -58,6 +57,7 @@ plot(pm10.no2, variable = "PM10", mode = "pca")    # Componentes principales
 scores_pm10  <- togstat(pm10.no2, vars = "PM10")
 scores_todos <- togstat(pm10.no2)
 
+library(gstat)
 vario_pm10  <- variogram(scores_pm10, cross = FALSE)
 vario_todos <- variogram(scores_todos)
 
@@ -107,6 +107,11 @@ toSpatFD(ajuste_pm10)
 # simple y reconstruye las curvas. El modelo decide qué se resuelve:
 #   - Sin variogramas cruzados -> kriging, un score a la vez
 #   - Con variogramas cruzados -> cokriging, todos los scores en conjunto
+#
+# Hay dos métodos de predicción (argumento 'method'):
+#   - "scores" (por defecto) -> predice los scores y reconstruye la curva con ellos
+#   - "lambda"               -> la curva es una combinación lineal de las curvas observadas.
+#                               Por ahora solo para una variable y sin variogramas cruzados.
 
 sitios_nuevos <- expand.grid(X = seq(478000, 505000, length.out = 3),
                              Y = seq(2135000, 2175000, length.out = 3))
@@ -114,6 +119,7 @@ rownames(sitios_nuevos) <- paste0("S", seq_len(nrow(sitios_nuevos)))
 
 pred_kriging   <- predict(pm10.no2, sitios_nuevos, model = "model 1")
 pred_cokriging <- predict(pm10.no2, sitios_nuevos, model = "lmc wave")
+pred_lambda    <- predict(pm10.no2, sitios_nuevos, model = "model 1", method = "lambda")
 
 # Si el modelo no sirve para lo que se pide, el error muestra la tabla de modelos:
 try(predict(pm10.no2, sitios_nuevos))                                        # falta escoger uno
@@ -133,17 +139,37 @@ names(pred_cokriging)         # El cokriging predice PM10 y NO2
 pred_cokriging$NO2$pred       # Curvas predichas de NO2
 pred_cokriging$NO2$var        # Su varianza de predicción
 
-# Curvas predichas (en color) sobre las curvas observadas (en gris)
+# plot() dibuja las curvas predichas (en color) sobre las curvas observadas (en gris)
 par(mfrow = c(1, 2))
-
-plot(attr(pm10.no2, "fd")$PM10, col = "grey80", lty = 1, main = "PM10 - Kriging")
-lines(pred_kriging$PM10$pred, col = "darkblue", lty = 1, lwd = 0.5)
-
-plot(attr(pm10.no2, "fd")$PM10, col = "grey80", lty = 1, main = "PM10 - Cokriging")
-lines(pred_cokriging$PM10$pred, col = "darkred", lty = 1, lwd = 0.5)
-
+plot(pred_kriging,   variable = "PM10", lwd = 0.5)                     # Kriging
+plot(pred_cokriging, variable = "PM10", lwd = 0.5, col = "darkred")    # Cokriging
 par(mfrow = c(1, 1))
 
-# Comparación de los dos modelos: varianza de predicción de PM10 en cada sitio nuevo
+# Los dos métodos con el mismo modelo: scores (kriging) y lambda
+par(mfrow = c(1, 2))
+plot(pred_kriging, variable = "PM10", lwd = 0.5, main = "PM10 - Método scores")
+plot(pred_lambda,  variable = "PM10", lwd = 0.5, main = "PM10 - Método lambda", col = "darkgreen")
+par(mfrow = c(1, 1))
+
+# Comparación de modelos y métodos: varianza de predicción de PM10 en cada sitio nuevo
 cbind(kriging   = pred_kriging$PM10$var,
-      cokriging = pred_cokriging$PM10$var)
+      cokriging = pred_cokriging$PM10$var,
+      lambda    = pred_lambda$PM10$var)
+
+
+# --------------------------------------------------------------------------------------------------
+#                                    7. PREDICCIÓN SOBRE UN MAPA
+# --------------------------------------------------------------------------------------------------
+# Si en lugar de sitios se entrega un mapa (objeto sf), predict() predice en una grilla regular
+# de puntos dentro del mapa y dibuja dos mapas lado a lado: la predicción y su varianza.
+#   - n     -> número aproximado de puntos de la grilla
+#   - Los puntos blancos son las estaciones donde se midió la variable.
+
+pred_mapa <- predict(pm10.no2, map_mexico, model = "lmc wave", variable = "PM10", n = 15000)
+
+# Una curva solo se puede mostrar en un mapa en un instante: se escoge con 'time'.
+# La varianza es la de toda la curva, así que su mapa no cambia.
+plot(pred_mapa, time = 1000, main = "PM10")
+
+# Las mismas predicciones se pueden ver como curvas
+plot(pred_mapa, mode = "curves", lwd = 0.2)

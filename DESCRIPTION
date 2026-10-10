@@ -72,6 +72,7 @@ Depends:
 Imports:
     fda,
     graphics,
+    grDevices,
     gstat,
     knitr,
     sp,

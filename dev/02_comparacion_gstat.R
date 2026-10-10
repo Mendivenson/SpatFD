@@ -7,6 +7,7 @@
 #   A. Variogramas: el modelo guardado en el objeto es el mismo que ajustó gstat
 #   B. Kriging:     scores predichos y varianzas, modelo sin variogramas cruzados
 #   C. Cokriging:   scores predichos y varianzas, modelo lineal de corregionalización
+#   D. Lambda:      curvas predichas y varianzas del método lambda
 #
 # La referencia es el kriging simple de gstat con media cero (beta = 0), que es lo que usa la
 # versión CRAN de SpatFD por dentro.
@@ -97,6 +98,37 @@ dif_cokriging <- sapply(colnames(cokriging_spatfd$pred), function(score) {
 
 
 # --------------------------------------------------------------------------------------------------
+#                                      D. MÉTODO LAMBDA
+# --------------------------------------------------------------------------------------------------
+# Referencia: las fórmulas de la versión CRAN, evaluando las covarianzas con gstat.
+#   pesos    = Omega^-1 c            con Omega y c sumados sobre los scores
+#   curva    = suma de pesos x curvas observadas
+#   varianza = suma sobre los scores de (valor propio - 2 c_k' pesos + pesos' Omega_k pesos)
+
+estaciones <- pm10.no2$scores[!is.na(pm10.no2$scores[, "PM10.PC1"]), c("X", "Y")]
+distancias_todas <- as.matrix(dist(rbind(estaciones, as.matrix(sitios_nuevos))))
+entre_estaciones <- distancias_todas[rownames(estaciones), rownames(estaciones)]
+a_sitios_nuevos  <- distancias_todas[rownames(sitios_nuevos), rownames(estaciones)]
+
+covarianza <- function(modelo, d) variogramLine(modelo, dist_vector = d, covariance = TRUE)
+omegas <- lapply(ajuste_pm10, covarianza, d = entre_estaciones)
+cs     <- lapply(ajuste_pm10, covarianza, d = a_sitios_nuevos)
+
+pesos <- solve(Reduce(`+`, omegas)) %*% t(Reduce(`+`, cs))
+
+valores_propios <- attr(pm10.no2, "pca")$PM10$values
+lambda_gstat <- list(
+  curvas   = attr(pm10.no2, "fd")$PM10$coefs[, rownames(estaciones)] %*% pesos,
+  varianza = Reduce(`+`, lapply(1:2, function(k) {
+    valores_propios[k] - 2 * diag(cs[[k]] %*% pesos) + diag(t(pesos) %*% omegas[[k]] %*% pesos)
+  }))
+)
+
+dif_lambda <- c(curvas   = diferencia(pred_lambda$PM10$pred$coefs, lambda_gstat$curvas),
+                varianza = diferencia(pred_lambda$PM10$var,        lambda_gstat$varianza))
+
+
+# --------------------------------------------------------------------------------------------------
 #                                         RESULTADO
 # --------------------------------------------------------------------------------------------------
 # Diferencias relativas entre SpatFD y gstat. Valores del orden de 1e-10 o menores son solo
@@ -114,10 +146,14 @@ print(signif(dif_kriging, 2))
 cat("\nC. Cokriging de PM10 y NO2\n")
 print(signif(dif_cokriging, 2))
 
+cat("\nD. Método lambda de PM10\n")
+print(signif(dif_lambda, 2))
+
 tolerancia <- 1e-8
 stopifnot(
   "Los variogramas no coinciden con gstat" = all(unlist(dif_variogramas) < tolerancia),
   "El kriging no coincide con gstat"       = all(dif_kriging     < tolerancia),
-  "El cokriging no coincide con gstat"     = all(dif_cokriging   < tolerancia)
+  "El cokriging no coincide con gstat"     = all(dif_cokriging   < tolerancia),
+  "El método lambda no coincide con gstat" = all(dif_lambda      < tolerancia)
 )
 cat("\nTodo coincide con gstat (diferencia relativa menor que", tolerancia, ")\n")
