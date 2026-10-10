@@ -17,16 +17,13 @@ library(gstat)
 # --------------------------------------------------------------------------------------------------
 #                                          1. DATOS
 # --------------------------------------------------------------------------------------------------
-# Contaminación del aire en Ciudad de México: PM10 y NO2 medidos cada hora en varias estaciones.
-#   - Mex_PM10, NO2          -> una columna por estación, una fila por hora
-#   - coord_PM10, coord_NO2  -> coordenadas de las estaciones
-#
-# Los datos todavía no están incluidos en la v2: se toman de la versión instalada desde CRAN,
-# mientras que el código se carga desde este repositorio.
+# Contaminación del aire en Ciudad de México: PM10 y NO2 medidos a lo largo del tiempo en
+# varias estaciones. Los datos vienen incluidos en el paquete (ver ?air_mexico).
+#   - pm10_mexico, no2_mexico                -> una columna por estación, una fila por momento de medición
+#   - coords_pm10_mexico, coords_no2_mexico  -> coordenadas de las estaciones
 
-data(COKMexico, package = "SpatFD", lib.loc = .libPaths())
 devtools::load_all()
-
+data(air_mexico)
 
 # --------------------------------------------------------------------------------------------------
 #                                     2. OBJETO SpatFD
@@ -34,12 +31,12 @@ devtools::load_all()
 # spatfd() suaviza las curvas y calcula sus componentes principales funcionales. De aquí en
 # adelante cada curva queda resumida por sus scores, que es lo que se modela espacialmente.
 
-pm10 <- spatfd(Mex_PM10, coords = as.matrix(coord_PM10),
+pm10 <- spatfd(pm10_mexico, coords = as.matrix(coords_pm10_mexico),
                basis = "fourier", nbasis = 21, lambda = 0.000001,
                nharm = 2, var = 0.95,
                name  = "PM10")
 
-no2 <- spatfd(NO2, coords = as.matrix(coord_NO2),
+no2 <- spatfd(no2_mexico, coords = as.matrix(coords_no2_mexico),
               basis = "fourier", nbasis = 21, lambda = 0.000001,
               nharm = 2, var = 0.99,
               name  = "NO2")

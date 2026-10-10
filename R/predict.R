@@ -174,20 +174,20 @@ krige_scores <- function(object, newcoords, model = NULL, variable = NULL){
   # ============================ MODELO A USAR =================================
   # Los modelos ya están compilados dentro del objeto, ver add_model(). En
   # caso de error se muestra la tabla resumen de los modelos registrados.
-  available   <- rownames(object$models)
-  summary_table <- paste(capture.output(print(object$models)), collapse = '\n')
+  available     <- ls(attr(object, 'models'))
+  summary_table <- function() paste(capture.output(print(object$models)), collapse = '\n')
 
   if (length(available) == 0) {
     stop('The object has no models. Register one with add_model()', call. = FALSE)
   }
   if (is.null(model)) {
     if (length(available) > 1) {
-      stop("The object has several models, choose one with 'model':\n", summary_table, call. = FALSE)
+      stop("The object has several models, choose one with 'model':\n", summary_table(), call. = FALSE)
     }
     model <- available
   }
   if (!is.character(model) || length(model) != 1 || !(model %in% available)) {
-    stop("'model' must be the name of one of the models of the object:\n", summary_table,
+    stop("'model' must be the name of one of the models of the object:\n", summary_table(),
          call. = FALSE)
   }
   compiled <- attr(object, 'models')[[model]]
@@ -231,14 +231,15 @@ krige_scores <- function(object, newcoords, model = NULL, variable = NULL){
   if (length(missing_models) > 0) {
     stop("The model '", model, "' has no variogram for the scores: ",
          paste(missing_models, collapse = ', '),
-         '\nThe models of the object are:\n', summary_table, call. = FALSE)
+         '\nThe models of the object are:\n', summary_table(), call. = FALSE)
   }
 
   # Sitios con score faltante se descartan campo a campo: las variables pueden
   # estar observadas en conjuntos de sitios distintos
-  observed <- lapply(ids, function(id) !is.na(object$scores[, id]))
-  sites    <- lapply(observed, function(obs) object$scores[obs, colnames(coords), drop = FALSE])
-  values   <- Map(function(id, obs) object$scores[obs, id], ids, observed)
+  scores   <- object$scores
+  observed <- lapply(ids, function(id) !is.na(scores[, id]))
+  sites    <- lapply(observed, function(obs) scores[obs, colnames(coords), drop = FALSE])
+  values   <- Map(function(id, obs) scores[obs, id], ids, observed)
 
   # ================================ KRIGING ===================================
   kriging <- simple_kriging(sites, values, score_covariances(compiled, ids), newcoords)
@@ -305,38 +306,112 @@ cross_dist <- function(a, b){
 # es diagonal por bloques y el sistema equivale a un kriging por campo; con
 # ellas es el sistema de cokriging. Los casos univariado y multivariado son
 # entonces el mismo sistema.
+#
+# Los campos que no están conectados por ninguna covarianza cruzada no
+# comparten información, así que cada grupo de campos conectados se resuelve
+# por aparte: da lo mismo que resolver el sistema completo y evita factorizar
+# una matriz llena de ceros.
 simple_kriging <- function(sites, values, covs, newcoords){
   q <- length(sites)
-  n <- vapply(sites, nrow, integer(1))
   m <- nrow(newcoords)
 
-  rows <- split(seq_len(sum(n)), rep(seq_len(q), n))         # Filas de cada campo
-  cols <- split(seq_len(m * q), rep(seq_len(q), each = m))   # Columnas de cada campo objetivo
+  # Los modelos no siempre conservan las dimensiones de la matriz de distancias.
+  # Si las distancias son entre un conjunto de sitios y él mismo la matriz es
+  # simétrica y basta evaluar la mitad.
+  evaluate <- function(covariance, d, symmetric = FALSE){
+    if (!symmetric) return(matrix(covariance(d), nrow(d), ncol(d)))
 
-  # Los modelos no siempre conservan las dimensiones de la matriz de distancias
-  evaluate <- function(covariance, d) matrix(covariance(d), nrow(d), ncol(d))
+    half <- lower.tri(d, diag = TRUE)
+    out  <- matrix(0, nrow(d), ncol(d))
+    out[half] <- covariance(d[half])
+    out[upper.tri(out)] <- t(out)[upper.tri(out)]
+    out
+  }
 
-  Sigma <- matrix(0, sum(n), sum(n))    # Covarianza entre observaciones
-  C0    <- matrix(0, sum(n), m * q)     # Covarianza entre observaciones y sitios nuevos
+  # DISTANCIAS: Los scores de una misma variable comparten sitios, así que cada
+  # matriz de distancias se calcula una sola vez por conjunto distinto de sitios
+  places <- list()
+  place  <- integer(q)                   # Conjunto de sitios de cada campo
+  for (i in seq_len(q)) {
+    known <- Position(function(p) identical(p, sites[[i]]), places)
+    if (is.na(known)) {
+      places <- c(places, list(sites[[i]]))
+      known  <- length(places)
+    }
+    place[i] <- known
+  }
 
+  computed <- list()
+  distance <- function(a, b){            # b = 0 son los sitios de predicción
+    key <- paste(a, b)
+    if (is.null(computed[[key]])) {
+      computed[[key]] <<- cross_dist(places[[a]], if (b == 0) newcoords else places[[b]])
+    }
+    computed[[key]]
+  }
+
+  # GRUPOS: Campos conectados, directa o indirectamente, por covarianzas cruzadas
+  group <- seq_len(q)
   for (i in seq_len(q)) {
     for (j in seq_len(q)) {
-      if (is.null(covs[[i, j]])) next
-      Sigma[rows[[i]], rows[[j]]] <- evaluate(covs[[i, j]], cross_dist(sites[[i]], sites[[j]]))
-      C0[rows[[i]], cols[[j]]]    <- evaluate(covs[[i, j]], cross_dist(sites[[i]], newcoords))
+      if (!is.null(covs[[i, j]])) group[group == group[j]] <- group[i]
     }
   }
 
-  # Una sola factorización sirve para todos los sitios y campos. Cholesky falla
-  # si Sigma no es definida positiva, lo que delata un modelo inválido.
-  R <- tryCatch(chol(Sigma), error = function(e) {
-    stop('The covariance matrix of the scores is not positive definite. ',
-         'Check for duplicated sites or for an invalid model', call. = FALSE)
-  })
-  W <- backsolve(R, backsolve(R, C0, transpose = TRUE))      # Pesos: Sigma^-1 C0
+  pred <- variance <- matrix(0, m, q)
 
-  sills <- vapply(seq_len(q), function(j) covs[[j, j]](0), numeric(1))
+  for (g in unique(group)) {
+    fields <- which(group == g)
+    k <- length(fields)
+    n <- vapply(sites[fields], nrow, integer(1))
 
-  list(pred     = matrix(crossprod(W, unlist(values)), m, q),
-       variance = matrix(rep(sills, each = m) - colSums(W * C0), m, q))
+    rows <- split(seq_len(sum(n)), rep(seq_len(k), n))         # Filas de cada campo
+    cols <- split(seq_len(m * k), rep(seq_len(k), each = m))   # Columnas de cada campo objetivo
+
+    Sigma <- matrix(0, sum(n), sum(n))    # Covarianza entre observaciones
+    C0    <- matrix(0, sum(n), m * k)     # Covarianza entre observaciones y sitios nuevos
+
+    for (a in seq_len(k)) {
+      for (b in a:k) {
+        i <- fields[a]
+        j <- fields[b]
+        if (is.null(covs[[i, j]])) next
+        same_sites <- place[i] == place[j]
+
+        # Sigma es simétrica: solo se evalúa un bloque de cada pareja de campos
+        block <- evaluate(covs[[i, j]], distance(place[i], place[j]), symmetric = same_sites)
+        Sigma[rows[[a]], rows[[b]]] <- block
+        if (a < b) Sigma[rows[[b]], rows[[a]]] <- t(block)
+
+        # La covarianza con los sitios nuevos solo depende de los sitios del
+        # campo observado: si ambos campos comparten sitios, es la misma
+        block <- evaluate(covs[[i, j]], distance(place[i], 0))
+        C0[rows[[a]], cols[[b]]] <- block
+        if (a < b) {
+          C0[rows[[b]], cols[[a]]] <- if (same_sites) block else evaluate(covs[[i, j]], distance(place[j], 0))
+        }
+      }
+    }
+
+    # Una sola factorización sirve para todos los sitios y campos del grupo.
+    # Cholesky falla si Sigma no es definida positiva, lo que delata un modelo
+    # inválido.
+    R <- tryCatch(chol(Sigma), error = function(e) {
+      stop('The covariance matrix of the scores is not positive definite. ',
+           'Check for duplicated sites or for an invalid model', call. = FALSE)
+    })
+    #
+    # Con Sigma = R'R y V = R'^-1 C0 no hace falta calcular los pesos Sigma^-1 C0:
+    #   predicción = C0' Sigma^-1 z  = V' (R'^-1 z)
+    #   varianza   = C(0) - C0' Sigma^-1 C0 = C(0) - suma por columnas de V^2
+    V <- backsolve(R, C0, transpose = TRUE)
+    z <- backsolve(R, unlist(values[fields]), transpose = TRUE)
+
+    sills <- vapply(fields, function(j) covs[[j, j]](0), numeric(1))
+
+    pred[, fields]     <- matrix(crossprod(V, z), m, k)
+    variance[, fields] <- matrix(rep(sills, each = m) - colSums(V^2), m, k)
+  }
+
+  list(pred = pred, variance = variance)
 }

@@ -153,11 +153,11 @@ spatfd <- function(dat,                      # Matriz/Dataframe de datos (Nombre
   if (!is.null(var)){
     selected_pc <- which(cumsum(pca$varprop) > var)
     if (length(selected_pc) > 0){
-      pca <- fda::pca.fd(fd, nharm = selected_pc[1])
+      # Solo se repite el análisis si se necesitan menos componentes que los ya calculados
+      if (selected_pc[1] < nharm) pca <- fda::pca.fd(fd, nharm = selected_pc[1])
       message('\t\033[32mVariance of ', var * 100, '% reached with ',
               selected_pc[1], ' principal components.\033[0m', appendLF = T)
     } else {
-      pca <- fda::pca.fd(fd, nharm = nharm)
       message('\t\033[033mWARNING: Desired variance not reached. \n\t\t A variance of ', round(sum(pca$varprop) * 100,2),
               '% was reached with ', nharm, ' principal components.\033[0m', appendLF = T)
     }
