@@ -16,16 +16,21 @@
 #' outside its domain: `h` must be numeric, non-negative and without missing values;
 #' `sigma` a single finite number; `rango` and `alpha1` single numbers greater
 #' than zero. In addition, `rango` (the exponent) of `power` and `alpha1` of
-#' `stable` cannot exceed 2. The sign of `sigma` is not checked, because the
-#' cross-variograms of a linear model of coregionalisation can have negative
-#' partial sills.
+#' `stable` cannot exceed 2, and `rango` of `linear` can be zero, which gives
+#' the linear model without a sill. The sign of `sigma` is not checked, because
+#' the cross-variograms of a linear model of coregionalisation can have
+#' negative partial sills.
 #'
 #' Mirrors of \pkg{gstat} models (\pkg{gstat} code in parentheses):
 #' `nugget` (`Nug`), `exponential` (`Exp`), `spherical` (`Sph`), `gaussian`
 #' (`Gau`), `stable` (`Exc`), `matern` (`Mat`), `stein's matern` (`Ste`),
 #' `circular` (`Cir`), `linear` (`Lin`), `bessel` (`Bes`), `pentamodel`
 #' (`Pen`), `periodic` (`Per`), `wave` (`Wav`), `hole` (`Hol`), `logarithmic`
-#' (`Log`), `power` (`Pow`), `spline` (`Spl`) and `legendre` (`Leg`).
+#' (`Log`), `power` (`Pow`), `spline` (`Spl`) and `legendre` (`Leg`). They
+#' follow the formulas of the source code of \pkg{gstat} and reproduce its
+#' values. Two of them have peculiarities inherited from it: `spline` returns
+#' the sill beyond its range, and `legendre` takes the distances in kilometres
+#' over the sphere.
 #'
 #' Models not available in \pkg{gstat}: `lanteujoul`, `radon ord 2`,
 #' `radon ord 4` and `cubic`.
@@ -186,38 +191,39 @@ models <- list(
     bfr <- vg < rango       # Antes de alcanzar el rango
     afr <- !bfr             # Después de alcanzar el rango
 
-    vg[bfr] <- sigma * (1.5*(h[bfr]/rango) - 0.5*((h[bfr]**3)/(rango**3)))
+    hr      <- h[bfr]/rango
+    vg[bfr] <- sigma * (2/pi) * (hr * sqrt(1 - hr^2) + asin(hr))
     vg[afr] <- sigma
     vg
   },
 
   # ::modelo lineal::
-  linear = function(h, sigma = 2, ...){
+  # Con rango = 0 es el modelo lineal sin meseta; con rango > 0 crece
+  # linealmente hasta alcanzar la meseta en el rango
+  linear = function(h, rango = 0, sigma = 2, ...){
     stopifnot(
       'Model "linear": `h` must be numeric, non-negative and without missing values' =
         is.numeric(h) && !anyNA(h) && all(h >= 0),
+      'Model "linear": `rango` must be a single number greater than or equal to 0' =
+        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango >= 0,
       'Model "linear": `sigma` must be a single finite number' =
         is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
     )
-    sigma * h
+    if (rango == 0) sigma * h else sigma * pmin(h/rango, 1)
   },
 
   # ::modelo Bessel::
-  bessel = function(h, rango = 1, sigma = 2, alpha1 = 0.25, ...){
+  bessel = function(h, rango = 1, sigma = 2, ...){
     stopifnot(
       'Model "bessel": `h` must be numeric, non-negative and without missing values' =
         is.numeric(h) && !anyNA(h) && all(h >= 0),
       'Model "bessel": `rango` must be a single number greater than 0' =
         is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
       'Model "bessel": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma),
-      'Model "bessel": `alpha1` must be a single number greater than 0' =
-        is.numeric(alpha1) && length(alpha1) == 1 && is.finite(alpha1) && alpha1 > 0
+        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
     )
-    vg <- sigma - sigma *
-      (2**((alpha1/2)-1)) * gamma(alpha1/2) * ((h/rango)**(1-(alpha1/2))) *
-      besselJ(x = h/rango, nu = ((alpha1/2)-1))
-    vg[h == 0] <- 0
+    vg <- sigma - sigma * (h/rango) * besselK(x = h/rango, nu = 1)
+    vg[h == 0] <- 0         # EVITAR: Nan en Bessel eval
     vg
   },
 
@@ -235,8 +241,8 @@ models <- list(
     bfr <- vg < rango          # Antes de alcanzar el rango
     afr <- !bfr                # Luego de alcanzar el rango
 
-    vg[bfr] <- sigma * ( (22/3) * (h[bfr]/rango)^2 - 33 * (h[bfr]/rango)^4 + 38.5 * (h[bfr]/rango)^5 -
-                          16.5 * (h[bfr]/rango)^7 + 5.5 * (h[bfr]/rango)^9 - (5/6) * (h[bfr]/rango)^11)
+    hr      <- h[bfr]/rango
+    vg[bfr] <- sigma * hr * (15/8 - (5/4) * hr^2 + (3/8) * hr^4)
     vg[afr] <- sigma
     vg
   },
@@ -287,15 +293,17 @@ models <- list(
   },
 
   # ::modelo logarítmico::
-  logarithmic = function(h,sigma = 2, ...){
+  logarithmic = function(h, rango = 1, sigma = 2, ...){
     stopifnot(
       'Model "logarithmic": `h` must be numeric, non-negative and without missing values' =
         is.numeric(h) && !anyNA(h) && all(h >= 0),
+      'Model "logarithmic": `rango` must be a single number greater than 0' =
+        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
       'Model "logarithmic": `sigma` must be a single finite number' =
         is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
     )
-    vg <- sigma * log(h)
-    vg[h == 0] <- 0    # EVITAR: -Inf log eval
+    vg <- sigma * log(h + rango)
+    vg[h == 0] <- 0    # El variograma vale cero en el origen
     vg
   },
 
@@ -313,23 +321,40 @@ models <- list(
   },
 
   # ::modelo spline::
+  # gstat trata este modelo como transitivo: más allá del rango devuelve la
+  # meseta. En un modelo anidado gstat aplica ese corte en el mayor de los
+  # rangos de todas las estructuras (y no lo aplica si alguna alcanza la meseta
+  # de forma asintótica); aquí el corte es siempre en el rango de esta estructura.
   spline = function(h, rango = 1, sigma = 2, ...){
     stopifnot(
       'Model "spline": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0)
+        is.numeric(h) && !anyNA(h) && all(h >= 0),
+      'Model "spline": `rango` must be a single number greater than 0' =
+        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
+      'Model "spline": `sigma` must be a single finite number' =
+        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
     )
-    vg <- h * h * log(h)
-    vg[h == 0] <- 0    # EVITAR: -Inf log eval
+    vg <- sigma * h * h * log(h)
+    vg[h == 0]    <- 0        # EVITAR: -Inf log eval
+    vg[h > rango] <- sigma
     vg
   },
 
   # ::modelo Legendre::
-  legendre = function(h, rango = 1, sigma = 2, ...){
+  # Pensado para distancias sobre la esfera: h se toma en kilómetros y se pasa
+  # a un ángulo con el radio de la Tierra (6378.137 km), igual que en gstat
+  legendre = function(h, rango = 0.5, sigma = 2, ...){
     stopifnot(
       'Model "legendre": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0)
+        is.numeric(h) && !anyNA(h) && all(h >= 0),
+      'Model "legendre": `rango` must be a single number greater than 0' =
+        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
+      'Model "legendre": `sigma` must be a single finite number' =
+        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
     )
-    vg <- h
+    angle <- h / (pi * 6378.137)
+    vg <- sigma * (2 - (1 - rango^2) / (1 - 2 * rango * cos(angle) + rango^2))
+    vg[h == 0] <- 0    # El variograma vale cero en el origen
     vg
   },
 

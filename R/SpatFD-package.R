@@ -48,7 +48,8 @@
 #'   Step 3, outside the package \tab e.g. [gstat::variogram()],
 #'     [gstat::fit.variogram()], [gstat::fit.lmc()] \cr
 #'   Bring the fitted models back \tab [toSpatFD()] and [add_model()] \cr
-#'   Predict the curves at new sites \tab [predict()][predict.SpatFD]
+#'   Predict the curves at new sites \tab [predict()][predict.SpatFD] \cr
+#'   Compare models and methods \tab [leave_one_out()]
 #' }
 #'
 #' @references

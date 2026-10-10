@@ -1,4 +1,4 @@
-h <- seq(10, 1000, length.out = 40)
+h <- c(0, seq(10, 1000, length.out = 40))
 
 # Evalúa un modelo de gstat pasando por toSpatFD() + la compilación
 compiled <- function(m) compile_model(toSpatFD(list(v = m)))$v
@@ -13,12 +13,24 @@ test_that("compiled models reproduce the gstat variogram", {
     Exc = gstat::vgm(2, "Exc", 300, kappa = 1.3),
     Mat = gstat::vgm(2, "Mat", 300, kappa = 1.3),
     Ste = gstat::vgm(2, "Ste", 300, kappa = 1.3),
+    Cir = gstat::vgm(2, "Cir", 300),
     Lin = gstat::vgm(2, "Lin", 0),
+    Lin_with_range = gstat::vgm(2, "Lin", 300),
+    Bes = gstat::vgm(2, "Bes", 300),
+    Pen = gstat::vgm(2, "Pen", 300),
     Per = gstat::vgm(2, "Per", 300),
     Wav = gstat::vgm(2, "Wav", 300),
     Hol = gstat::vgm(2, "Hol", 300),
-    Pow = gstat::vgm(2, "Pow", 1.5)
+    Log = gstat::vgm(2, "Log", 300),
+    Pow = gstat::vgm(2, "Pow", 1.5),
+    Spl = gstat::vgm(2, "Spl", 300),
+    Leg = gstat::vgm(2, "Leg", 0.5)
   )
+
+  # Todos los modelos que gstat ofrece y que tienen espejo en el paquete
+  expect_setequal(vapply(gstat_models, function(m) as.character(m$model), character(1)),
+                  c("Nug", "Exp", "Sph", "Gau", "Exc", "Mat", "Ste", "Cir", "Lin", "Bes", "Pen",
+                    "Per", "Wav", "Hol", "Log", "Pow", "Spl", "Leg"))
 
   for (code in names(gstat_models)) {
     m <- gstat_models[[code]]
@@ -63,6 +75,10 @@ test_that("models reject parameters outside their domain", {
   expect_error(models$power(h, rango = 3), "in (0, 2]", fixed = TRUE)
   expect_no_error(models$stable(h, alpha1 = 2))
   expect_no_error(models$exponential(h, rango = 3))
+
+  # El modelo lineal admite rango cero (sin meseta), pero no negativo
+  expect_no_error(models$linear(h, rango = 0))
+  expect_error(models$linear(h, rango = -1), "`rango` must be")
 
   # Solo se revisan los parámetros que el modelo usa
   expect_no_error(models$nugget(h, rango = 0))

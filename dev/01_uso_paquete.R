@@ -10,6 +10,7 @@
 #   5. Predicción en sitios nuevos
 #   6. Resultados
 #   7. Predicción sobre un mapa
+#   8. Comparación de modelos y métodos por validación cruzada
 #
 # La comprobación de que los resultados coinciden con gstat está en dev/02_comparacion_gstat.R
 
@@ -173,3 +174,27 @@ plot(pred_mapa, time = 1000, main = "PM10")
 
 # Las mismas predicciones se pueden ver como curvas
 plot(pred_mapa, mode = "curves", lwd = 0.2)
+
+
+# --------------------------------------------------------------------------------------------------
+#                    8. COMPARACIÓN DE MODELOS Y MÉTODOS POR VALIDACIÓN CRUZADA
+# --------------------------------------------------------------------------------------------------
+# leave_one_out() deja por fuera una estación a la vez, repite el análisis sin ella (suavizamiento
+# y componentes principales), predice su curva con las demás y mide qué tan lejos queda de la
+# curva observada. Los modelos de variograma no se vuelven a ajustar.
+#
+# Por defecto compara cada modelo que cubre la variable con cada método que admite.
+
+validacion <- leave_one_out(pm10.no2, variable = "PM10")
+validacion                    # Tabla de comparación, del menor al mayor error medio
+
+validacion$errors             # Error de cada estación con cada combinación
+
+# También se pueden escoger las combinaciones con una tabla de modelo y método
+leave_one_out(pm10.no2, variable = "PM10",
+              design = data.frame(model  = c("model 1", "lmc wave"),
+                                  method = c("scores",  "scores")))
+
+# Curvas predichas al dejar por fuera cada estación (en color) frente a las observadas (en gris)
+plot(attr(pm10.no2, "fd")$PM10, col = "grey70", lty = 1, main = "PM10 - Validación cruzada (lmc wave)")
+lines(validacion$pred[["lmc wave / scores"]], col = "darkred", lty = 1, lwd = 0.5)

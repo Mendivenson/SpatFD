@@ -18,16 +18,21 @@ Every model checks its own parameters and stops with an error when one is
 outside its domain: \code{h} must be numeric, non-negative and without missing values;
 \code{sigma} a single finite number; \code{rango} and \code{alpha1} single numbers greater
 than zero. In addition, \code{rango} (the exponent) of \code{power} and \code{alpha1} of
-\code{stable} cannot exceed 2. The sign of \code{sigma} is not checked, because the
-cross-variograms of a linear model of coregionalisation can have negative
-partial sills.
+\code{stable} cannot exceed 2, and \code{rango} of \code{linear} can be zero, which gives
+the linear model without a sill. The sign of \code{sigma} is not checked, because
+the cross-variograms of a linear model of coregionalisation can have
+negative partial sills.
 
 Mirrors of \pkg{gstat} models (\pkg{gstat} code in parentheses):
 \code{nugget} (\code{Nug}), \code{exponential} (\code{Exp}), \code{spherical} (\code{Sph}), \code{gaussian}
 (\code{Gau}), \code{stable} (\code{Exc}), \code{matern} (\code{Mat}), \verb{stein's matern} (\code{Ste}),
 \code{circular} (\code{Cir}), \code{linear} (\code{Lin}), \code{bessel} (\code{Bes}), \code{pentamodel}
 (\code{Pen}), \code{periodic} (\code{Per}), \code{wave} (\code{Wav}), \code{hole} (\code{Hol}), \code{logarithmic}
-(\code{Log}), \code{power} (\code{Pow}), \code{spline} (\code{Spl}) and \code{legendre} (\code{Leg}).
+(\code{Log}), \code{power} (\code{Pow}), \code{spline} (\code{Spl}) and \code{legendre} (\code{Leg}). They
+follow the formulas of the source code of \pkg{gstat} and reproduce its
+values. Two of them have peculiarities inherited from it: \code{spline} returns
+the sill beyond its range, and \code{legendre} takes the distances in kilometres
+over the sphere.
 
 Models not available in \pkg{gstat}: \code{lanteujoul}, \verb{radon ord 2},
 \verb{radon ord 4} and \code{cubic}.

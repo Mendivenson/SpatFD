@@ -94,10 +94,13 @@ diferencias relativas del orden de $10^{-16}$.
         modelo, el rango, la meseta parcial y el parámetro \code{kappa}. La
         anisotropía se descarta sin aviso, y un modelo \code{Lin} con rango se
         traduce como lineal no acotado.
-  \item \textbf{Modelos que no coinciden con gstat.} Seis modelos espejo
-        (\code{circular}, \code{bessel}, \code{pentamodel},
-        \code{logarithmic}, \code{spline} y \code{legendre}) no reproducen a
-        \code{gstat}. Predecir con ellos da resultados distintos sin aviso.
+  \item \textbf{Modelos espejo de gstat.} Los 18 modelos espejo siguen las
+        fórmulas del código fuente de \code{gstat} y reproducen sus valores.
+        Dos heredan particularidades de \code{gstat}: \code{spline} devuelve
+        la meseta más allá de su rango (en un modelo anidado \code{gstat}
+        aplica ese corte en el mayor de los rangos, aquí en el rango de la
+        propia estructura), y \code{legendre} toma las distancias en
+        kilómetros sobre la esfera.
   \item \textbf{Un solo traductor.} Solo se pueden traer modelos ajustados con
         \code{gstat}.
 \end{itemize}
@@ -201,14 +204,38 @@ donde $\eta_k$ es el valor propio del componente $k$.
         estaciones. El mapa de predicción muestra un solo instante.
 \end{itemize}
 
+\section{Validación cruzada}
+
+\code{leave\_one\_out()} compara modelos y métodos dejando por fuera un sitio
+a la vez y midiendo la distancia entre la curva observada y la predicha,
+$\lVert \chi_{s_i} - \hat\chi_{s_i}^{(-i)} \rVert$.
+\begin{itemize}
+  \item \textbf{Qué se repite y qué no.} Sin el sitio se repiten el
+        suavizamiento y el FPCA, con los mismos argumentos y el mismo número
+        de componentes. Los modelos de variograma \emph{no} se vuelven a
+        ajustar: son los registrados en el objeto, que se ajustaron con todos
+        los sitios. El error queda por eso algo optimista.
+  \item \textbf{Signo de los componentes.} El signo de un componente
+        principal es arbitrario y puede cambiar al quitar un sitio. Los
+        componentes de cada repetición se dejan con el signo del análisis
+        completo, para que los variogramas cruzados conserven su sentido.
+  \item \textbf{Cokriging.} Con un modelo de varias variables solo se deja por
+        fuera la curva de la variable validada; las demás variables conservan
+        su observación en ese sitio.
+  \item \textbf{Diferencia con CRAN.} Las curvas predichas en cada repetición
+        son las mismas que las de \code{crossval\_loo()} de la versión CRAN.
+        Los errores difieren hasta en un 2\% porque CRAN calcula la norma
+        por integración numérica y aquí se calcula de forma exacta con los
+        productos internos de la base.
+  \item \textbf{Costo.} Cada sitio implica repetir el análisis y factorizar de
+        nuevo las matrices de covarianza, por cada modelo comparado.
+\end{itemize}
+
 \section{Pendientes}
 
 \begin{itemize}
-  \item Validación cruzada dejando un sitio por fuera, que es la herramienta
-        prevista para comparar modelos y métodos.
   \item Kriging ordinario, necesario para los modelos sin meseta.
   \item Método \code{lambda} centrado y su extensión multivariada.
-  \item Corregir los seis modelos espejo que no coinciden con \code{gstat}.
 \end{itemize}
 
 \end{document}

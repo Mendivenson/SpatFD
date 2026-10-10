@@ -49,3 +49,14 @@ test_that("togstat() exports the selected scores", {
   expect_named(togstat(ab, vars = "a")$data, c("a.PC1", "a.PC2"))
   expect_error(togstat(ab, vars = "z"), "Variables not found")
 })
+
+test_that("combining objects does not mix up sites with similar names", {
+  # 's1' solo está en la segunda variable: no debe tomar los scores de 's10'
+  x  <- spatfd(sim_data(sites[-1], 1), coords, basis = "fourier", nbasis = 11, nharm = 2, name = "x")
+  y  <- spatfd(sim_data(sites, 2), coords, basis = "fourier", nbasis = 11, nharm = 2, name = "y")
+  xy <- x + y
+
+  expect_true(all(is.na(xy$scores["s1", c("x.PC1", "x.PC2")])))
+  expect_equal(xy$scores["s10", c("x.PC1", "x.PC2")], x$scores["s10", c("x.PC1", "x.PC2")])
+  expect_equal(xy$scores[sites, c("y.PC1", "y.PC2")], y$scores[sites, c("y.PC1", "y.PC2")])
+})

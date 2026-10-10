@@ -50,8 +50,11 @@
 #'   \item{`data`}{Original data matrix, plus the coordinates under `coords`.}
 #'   \item{`models`}{Compiled variogram models, indexed by model name. See
 #'     [add_model()].}
+#'   \item{`args`}{Arguments used to smooth each variable (`t`, `basis`,
+#'     `nbasis` and `lambda`), kept so that the analysis can be repeated
+#'     without a site, see [leave_one_out()].}
 #' }
-#' The first three are indexed by variable name.
+#' All but `models` are indexed by variable name.
 #'
 #' @section Theory:
 #' Each column of `dat` is a curve \eqn{\chi_{s_i}(t)} observed at a finite
@@ -129,6 +132,7 @@ spatfd <- function(dat,                      # Matriz/Dataframe de datos (Nombre
 
   # ========================== DATA SMOOTHING ==================================
   hr <- range(t)                                          # Function's range
+  basis_type <- basis                                     # Se conserva para poder repetir el análisis
   oplfd <- fda::vec2Lfd(bwtvec = c(1,ncol(dat)),
                         rangeval = hr)                    # Penalization
   basis <- switch(basis,                                  # Functional basis to use
@@ -203,11 +207,17 @@ spatfd <- function(dat,                      # Matriz/Dataframe de datos (Nombre
   env_dat[[name]]     <- dat
   env_dat[['coords']] <- coords
 
+  # Argumentos del suavizamiento: permiten repetir el análisis sin algún sitio,
+  # ver leave_one_out()
+  env_args <- new.env(parent = emptyenv())
+  env_args[[name]] <- list(t = t, basis = basis_type, nbasis = nbasis, lambda = lambda)
+
   result <- structure(result,
                       class = 'SpatFD',
                       pca = env_pca,
                       fd = env_fd,
                       data = env_dat,
+                      args = env_args,
                       models = new.env(parent = emptyenv()))
 
   return(result)
@@ -460,8 +470,13 @@ var_names.SpatFD <- function(x) {
   pts <- c(rownames(score.x1), rownames(score.x2)) |>
     unique() |>
     sort()
-  scores <- cbind(coords[pts,], score.x1[pts, , drop = F], score.x2[pts, , drop = F]) |>
+  # Se emparejan con match(): indexar un data frame por nombre de fila hace
+  # coincidencias parciales (el sitio 's1' tomaría los scores de 's10')
+  scores <- cbind(coords[pts,],
+                  score.x1[match(pts, rownames(score.x1)), , drop = F],
+                  score.x2[match(pts, rownames(score.x2)), , drop = F]) |>
     as.matrix()
+  rownames(scores) <- pts
   result$scores <- scores
 
   pca <- new.env(parent = emptyenv())
@@ -476,6 +491,10 @@ var_names.SpatFD <- function(x) {
 
   list2env(as.list(attr(x1, 'data')), envir = dat)
   list2env(as.list(attr(x2, 'data'))[names_x2], envir = dat)
+
+  args <- new.env(parent = emptyenv())
+  list2env(as.list(attr(x1, 'args')), envir = args)
+  list2env(as.list(attr(x2, 'args'))[names_x2], envir = args)
 
   dat$coords <- coords
 
@@ -503,6 +522,7 @@ var_names.SpatFD <- function(x) {
                       pca = pca,
                       fd = fd,
                       data = dat,
+                      args = args,
                       models = models)
 
 

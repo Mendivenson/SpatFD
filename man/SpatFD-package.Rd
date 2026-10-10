@@ -57,7 +57,8 @@ Export the scores \tab \code{\link[=togstat]{togstat()}} \cr
 Step 3, outside the package \tab e.g. \code{\link[gstat:variogram]{gstat::variogram()}},
 \code{\link[gstat:fit.variogram]{gstat::fit.variogram()}}, \code{\link[gstat:fit.lmc]{gstat::fit.lmc()}} \cr
 Bring the fitted models back \tab \code{\link[=toSpatFD]{toSpatFD()}} and \code{\link[=add_model]{add_model()}} \cr
-Predict the curves at new sites \tab \link[=predict.SpatFD]{predict()}
+Predict the curves at new sites \tab \link[=predict.SpatFD]{predict()} \cr
+Compare models and methods \tab \code{\link[=leave_one_out]{leave_one_out()}}
 }
 }
 

@@ -63,8 +63,11 @@ and the attributes (each one an environment)
 \item{\code{data}}{Original data matrix, plus the coordinates under \code{coords}.}
 \item{\code{models}}{Compiled variogram models, indexed by model name. See
 \code{\link[=add_model]{add_model()}}.}
+\item{\code{args}}{Arguments used to smooth each variable (\code{t}, \code{basis},
+\code{nbasis} and \code{lambda}), kept so that the analysis can be repeated
+without a site, see \code{\link[=leave_one_out]{leave_one_out()}}.}
 }
-The first three are indexed by variable name.
+All but \code{models} are indexed by variable name.
 }
 \description{
 Wraps the core functional data workflow of the \pkg{fda} package
