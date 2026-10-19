@@ -98,3 +98,8 @@ test_that("invalid parameters are reported when compiling", {
                    rango = -300, sigma = 2, alpha1 = NA)
   expect_error(compile_model(df), 'Model "exponential": `rango` must be')
 })
+
+test_that("toSpatFD() only accepts named lists of gstat models", {
+  expect_error(toSpatFD(list(a = 1)), "named list of gstat variogram models")
+  expect_error(toSpatFD(list(gstat::vgm(2, "Exp", 300))), "named list of gstat variogram models")
+})

@@ -5,7 +5,7 @@
 \alias{print.SpatFDloo}
 \title{Leave-one-out cross-validation of models and prediction methods}
 \usage{
-leave_one_out(sfd, design = NULL, variable = NULL)
+leave_one_out(sfd, design = NULL, variable = NULL, kriging = "ordinary")
 
 \method{print}{SpatFDloo}(x, ...)
 }
@@ -20,6 +20,10 @@ the variable is combined with every method it can be used with.}
 
 \item{variable}{Name of the variable whose curves are predicted. Defaults
 to the first variable of the object, see \code{\link[=var_names]{var_names()}}.}
+
+\item{kriging}{Type of kriging used in every combination: \code{"ordinary"} (the
+default) or \code{"simple"}, see \link[=predict.SpatFD]{predict()}. With
+\code{"simple"}, the default design leaves out the models without a sill.}
 
 \item{x}{An object of class \code{SpatFDloo}, as returned by \code{leave_one_out()}.}
 
@@ -36,7 +40,8 @@ error).}
 \item{\code{errors}}{Matrix with the error of every site (rows) for every
 combination (columns).}
 \item{\code{pred}}{List with the curves predicted for every combination, as a
-functional data object of \pkg{fda} with one curve per site.}
+matrix with one row per time of the observed data and one column per
+site, the same layout as the data given to \code{\link[=spatfd]{spatfd()}}.}
 }
 }
 \description{
@@ -58,7 +63,12 @@ keep their meaning.
 
 With a model that covers several variables (cokriging), only the curve of
 \code{variable} is left out: the other variables keep their observation at that
-site, when they have one.
+site, when they have one. Both methods use every variable of the model.
+
+With the method \code{"lambda"} and variables observed over different time
+intervals, the curves are predicted, and the errors measured, only over the
+common interval (see \link[=predict.SpatFD]{predict()}). Those errors are then
+not directly comparable with the ones of the method \code{"scores"}.
 }
 \section{Theory}{
 
@@ -79,11 +89,11 @@ coords <- cbind(x = runif(10), y = runif(10))
 rownames(coords) <- colnames(dat)
 sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
 
-add_model(sfd, list(
+sfd <- add_model(sfd, list(
   "sim.PC1" = gstat::vgm(psill = 30, model = "Exp", range = 0.5),
   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Exp", range = 0.5)
 ), name = "exponential")
-add_model(sfd, list(
+sfd <- add_model(sfd, list(
   "sim.PC1" = gstat::vgm(psill = 30, model = "Sph", range = 0.8),
   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Sph", range = 0.8)
 ), name = "spherical")

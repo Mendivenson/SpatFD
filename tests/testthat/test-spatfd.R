@@ -48,6 +48,9 @@ test_that("togstat() exports the selected scores", {
 
   expect_named(togstat(ab, vars = "a")$data, c("a.PC1", "a.PC2"))
   expect_error(togstat(ab, vars = "z"), "Variables not found")
+
+  # Se conserva el orden de los scores del objeto: gstat::fit.lmc() depende de él
+  expect_named(togstat(b + a)$data, c("b.PC1", "b.PC2", "a.PC1", "a.PC2"))
 })
 
 test_that("combining objects does not mix up sites with similar names", {
@@ -59,4 +62,29 @@ test_that("combining objects does not mix up sites with similar names", {
   expect_true(all(is.na(xy$scores["s1", c("x.PC1", "x.PC2")])))
   expect_equal(xy$scores["s10", c("x.PC1", "x.PC2")], x$scores["s10", c("x.PC1", "x.PC2")])
   expect_equal(xy$scores[sites, c("y.PC1", "y.PC2")], y$scores[sites, c("y.PC1", "y.PC2")])
+})
+
+test_that("the object only exposes scores, variance and models", {
+  ab <- a + b
+
+  # Nada funcional queda a la vista: solo tablas y matrices
+  expect_named(ab, c("scores", "variance", "models"))
+  expect_true(is.matrix(ab$scores))
+  expect_s3_class(ab$variance, "data.frame")
+  expect_s3_class(ab$models, "data.frame")
+  expect_equal(nrow(ab$models), 0)
+
+  # La forma funcional vive en un único atributo oculto
+  expect_setequal(names(attributes(ab)), c("names", "class", "internal"))
+  expect_s3_class(get_fd(ab, "a"), "fd")
+  expect_s3_class(get_pca(ab, "b"), "pca.fd")
+  expect_equal(get_coords(ab), coords)
+})
+
+test_that("summary() returns the tables of the object", {
+  s <- summary(a)
+  expect_s3_class(s, "summary.SpatFD")
+  expect_equal(s$variance, a$variance)
+  expect_output(print(s), "PCA information")
+  expect_output(print(a), "a.PC1")
 })

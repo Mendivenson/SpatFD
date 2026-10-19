@@ -67,38 +67,19 @@ models <- list(
 
   # ::efecto pepita::
   nugget = function(h, sigma = 2, ...){
-    stopifnot(
-      'Model "nugget": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "nugget": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('nugget', h, sigma = sigma)
     sigma * (h > 0)        # El variograma vale cero en el origen
   },
 
   # ::modelo exponencial::
   exponential = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "exponential": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "exponential": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "exponential": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('exponential', h, rango = rango, sigma = sigma)
     sigma - sigma * exp(- h/rango)
   },
 
   # ::modelo esférico::
   spherical = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "spherical": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "spherical": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "spherical": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('spherical', h, rango = rango, sigma = sigma)
     vg     <- h
     bfr    <- vg < rango                   # Antes de alcanzar el rango
     afr    <- !bfr                         # Después de alcanzar el rango
@@ -110,46 +91,19 @@ models <- list(
 
   # ::modelo gaussiano::
   gaussian = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "gaussian": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "gaussian": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "gaussian": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('gaussian', h, rango = rango, sigma = sigma)
     sigma - sigma * exp(- ((h/rango)^2))
   },
 
   # ::modelo estable::
   stable = function(h, rango = 1, sigma = 2, alpha1 = 1.3,...){
-    stopifnot(
-      'Model "stable": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "stable": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "stable": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma),
-      'Model "stable": `alpha1` must be a single number in (0, 2]' =
-        is.numeric(alpha1) && length(alpha1) == 1 && is.finite(alpha1) && alpha1 > 0 && alpha1 <= 2
-    )
-    vg  <- h
-    vg  <- sigma - sigma * exp( -((h/rango)^alpha1))
-    vg
+    check_params('stable', h, rango = rango, sigma = sigma, alpha1 = alpha1, alpha1_domain = 'up to 2')
+    sigma - sigma * exp( -((h/rango)^alpha1))
   },
 
   # ::modelo matern::
   matern = function(h, rango = 1, sigma = 2, alpha1 = 0.25, ...){
-    stopifnot(
-      'Model "matern": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "matern": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "matern": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma),
-      'Model "matern": `alpha1` must be a single number greater than 0' =
-        is.numeric(alpha1) && length(alpha1) == 1 && is.finite(alpha1) && alpha1 > 0
-    )
+    check_params('matern', h, rango = rango, sigma = sigma, alpha1 = alpha1)
     vg <- sigma - sigma *
       (1 / ((2**(alpha1-1)) * gamma(alpha1))) * ((h/rango)**alpha1) *
       besselK(x = h/rango, nu = alpha1)
@@ -159,16 +113,7 @@ models <- list(
 
   # ::modelo matern (parametrización Stein)::
   `stein's matern` = function(h, rango = 1, sigma = 2, alpha1 = 0.25, ...){
-    stopifnot(
-      "Model \"stein's matern\": `h` must be numeric, non-negative and without missing values" =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      "Model \"stein's matern\": `rango` must be a single number greater than 0" =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      "Model \"stein's matern\": `sigma` must be a single finite number" =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma),
-      "Model \"stein's matern\": `alpha1` must be a single number greater than 0" =
-        is.numeric(alpha1) && length(alpha1) == 1 && is.finite(alpha1) && alpha1 > 0
-    )
+    check_params("stein's matern", h, rango = rango, sigma = sigma, alpha1 = alpha1)
     arg <- 2 * sqrt(alpha1) * h / rango
     vg <- sigma - sigma *
       (2^(1 - alpha1) / gamma(alpha1)) * (arg^alpha1) *
@@ -179,14 +124,7 @@ models <- list(
 
   # ::modelo circular::
   circular = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "circular": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "circular": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "circular": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('circular', h, rango = rango, sigma = sigma)
     vg  <- h
     bfr <- vg < rango       # Antes de alcanzar el rango
     afr <- !bfr             # Después de alcanzar el rango
@@ -201,27 +139,13 @@ models <- list(
   # Con rango = 0 es el modelo lineal sin meseta; con rango > 0 crece
   # linealmente hasta alcanzar la meseta en el rango
   linear = function(h, rango = 0, sigma = 2, ...){
-    stopifnot(
-      'Model "linear": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "linear": `rango` must be a single number greater than or equal to 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango >= 0,
-      'Model "linear": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('linear', h, rango = rango, sigma = sigma, rango_domain = 'non-negative')
     if (rango == 0) sigma * h else sigma * pmin(h/rango, 1)
   },
 
   # ::modelo Bessel::
   bessel = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "bessel": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "bessel": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "bessel": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('bessel', h, rango = rango, sigma = sigma)
     vg <- sigma - sigma * (h/rango) * besselK(x = h/rango, nu = 1)
     vg[h == 0] <- 0         # EVITAR: Nan en Bessel eval
     vg
@@ -229,14 +153,7 @@ models <- list(
 
   # ::modelo pentaesférico::
   pentamodel = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "pentamodel": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "pentamodel": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "pentamodel": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('pentamodel', h, rango = rango, sigma = sigma)
     vg  <- h
     bfr <- vg < rango          # Antes de alcanzar el rango
     afr <- !bfr                # Luego de alcanzar el rango
@@ -249,29 +166,13 @@ models <- list(
 
   # ::modelo periódico::
   periodic = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "periodic": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "periodic": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "periodic": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('periodic', h, rango = rango, sigma = sigma)
     sigma - sigma * cos((2 * pi * h) / rango)
   },
 
   # ::modelo wave::
-  wave        = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "wave": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "wave": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "wave": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
-    vg  <- h
-
+  wave = function(h, rango = 1, sigma = 2, ...){
+    check_params('wave', h, rango = rango, sigma = sigma)
     vg  <- sigma - sigma * (rango/ (pi * h)) * sin(pi * h/rango)
     vg[h == 0] <- 0
     vg
@@ -279,14 +180,7 @@ models <- list(
 
   # ::modelo hueco::
   hole = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "hole": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "hole": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "hole": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('hole', h, rango = rango, sigma = sigma)
     vg <- sigma - sigma * sin(h/rango) / (h/rango)
     vg[h == 0] <- 0    # EVITAR: 0/0
     vg
@@ -294,14 +188,7 @@ models <- list(
 
   # ::modelo logarítmico::
   logarithmic = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "logarithmic": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "logarithmic": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "logarithmic": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('logarithmic', h, rango = rango, sigma = sigma)
     vg <- sigma * log(h + rango)
     vg[h == 0] <- 0    # El variograma vale cero en el origen
     vg
@@ -309,14 +196,7 @@ models <- list(
 
   # ::modelo power::
   power = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "power": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "power": `rango` must be a single number in (0, 2]' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0 && rango <= 2,
-      'Model "power": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('power', h, rango = rango, sigma = sigma, rango_domain = 'up to 2')
     sigma * (h ^ rango)
   },
 
@@ -326,14 +206,7 @@ models <- list(
   # rangos de todas las estructuras (y no lo aplica si alguna alcanza la meseta
   # de forma asintótica); aquí el corte es siempre en el rango de esta estructura.
   spline = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "spline": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "spline": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "spline": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('spline', h, rango = rango, sigma = sigma)
     vg <- sigma * h * h * log(h)
     vg[h == 0]    <- 0        # EVITAR: -Inf log eval
     vg[h > rango] <- sigma
@@ -344,14 +217,7 @@ models <- list(
   # Pensado para distancias sobre la esfera: h se toma en kilómetros y se pasa
   # a un ángulo con el radio de la Tierra (6378.137 km), igual que en gstat
   legendre = function(h, rango = 0.5, sigma = 2, ...){
-    stopifnot(
-      'Model "legendre": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "legendre": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "legendre": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('legendre', h, rango = rango, sigma = sigma)
     angle <- h / (pi * 6378.137)
     vg <- sigma * (2 - (1 - rango^2) / (1 - 2 * rango * cos(angle) + rango^2))
     vg[h == 0] <- 0    # El variograma vale cero en el origen
@@ -366,53 +232,25 @@ models <- list(
   # -------------------------------------------- NON GSTAT MODELS ----------------------------------
   # ::modelo lanteujoul::
   lanteujoul = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "lanteujoul": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "lanteujoul": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "lanteujoul": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('lanteujoul', h, rango = rango, sigma = sigma)
     sigma - sigma * sin(pi/2 * exp(- abs(h)/rango))
   },
 
   # ::modelo radon de orden 2::
   `radon ord 2` = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "radon ord 2": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "radon ord 2": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "radon ord 2": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('radon ord 2', h, rango = rango, sigma = sigma)
     sigma-sigma*(1 + h/rango)*exp(-h/rango)
   },
 
   # ::modelo radon de orden 4::
   `radon ord 4` = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "radon ord 4": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "radon ord 4": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "radon ord 4": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('radon ord 4', h, rango = rango, sigma = sigma)
     sigma-sigma*(1 + h/rango + (1/3) * (h/rango)^2) * exp(-h/rango)
   },
 
   # ::modelo cúbico:
   cubic = function(h, rango = 1, sigma = 2, ...){
-    stopifnot(
-      'Model "cubic": `h` must be numeric, non-negative and without missing values' =
-        is.numeric(h) && !anyNA(h) && all(h >= 0),
-      'Model "cubic": `rango` must be a single number greater than 0' =
-        is.numeric(rango) && length(rango) == 1 && is.finite(rango) && rango > 0,
-      'Model "cubic": `sigma` must be a single finite number' =
-        is.numeric(sigma) && length(sigma) == 1 && is.finite(sigma)
-    )
+    check_params('cubic', h, rango = rango, sigma = sigma)
     vg     <- h
     bfr    <- vg < rango                  # antes de alcanzar el rango
     afr    <- !bfr                        # luego de alcanzar el rango
@@ -423,6 +261,38 @@ models <- list(
     vg
   }
 )
+
+# VALIDACIÓN DE PARÁMETROS: Común a todos los modelos. Solo se revisan los
+# parámetros que el modelo usa (los que se pasan aquí). Dominios:
+#   'positive'     -> mayor que cero (por defecto)
+#   'non-negative' -> mayor o igual que cero (rango del modelo lineal)
+#   'up to 2'      -> en (0, 2] (exponentes de power y stable)
+check_params <- function(model, h, sigma, rango = NULL, alpha1 = NULL,
+                         rango_domain = 'positive', alpha1_domain = 'positive'){
+
+  fail <- function(arg, what) {
+    stop('Model "', model, '": `', arg, '` must be ', what, call. = FALSE)
+  }
+  is_number <- function(x) is.numeric(x) && length(x) == 1 && is.finite(x)
+  in_domain <- function(x, domain) {
+    is_number(x) && switch(domain,
+                           'positive'     = x > 0,
+                           'non-negative' = x >= 0,
+                           'up to 2'      = x > 0 && x <= 2)
+  }
+  domain_text <- c('positive'     = 'a single number greater than 0',
+                   'non-negative' = 'a single number greater than or equal to 0',
+                   'up to 2'      = 'a single number in (0, 2]')
+
+  if (!(is.numeric(h) && !anyNA(h) && all(h >= 0))) {
+    fail('h', 'numeric, non-negative and without missing values')
+  }
+  if (!is.null(rango) && !in_domain(rango, rango_domain)) fail('rango', domain_text[[rango_domain]])
+  if (!is_number(sigma)) fail('sigma', 'a single finite number')
+  if (!is.null(alpha1) && !in_domain(alpha1, alpha1_domain)) fail('alpha1', domain_text[[alpha1_domain]])
+
+  invisible(TRUE)
+}
 
 # FUNCIÓN PARA QUE EL USUARIO SEPA CUÁLES SON LAS POSIBLES OPCIONES DE MODELO
 
@@ -442,23 +312,21 @@ models <- list(
 #' availablemodels(txt = TRUE)
 #' availablemodels()
 #'
-#' @importFrom graphics abline curve par
 #' @export
 availablemodels <- function(txt = F){
   if (!txt){
-    old = par(mfrow = c(5,5), mar = c(0.4, 0.4, 1.4, 0.4))
-    invisible(
-      lapply(names(models), \(model) {
-        curve(models[[model]](x, rango = 1.5, sigma = 5, alpha1 = 1.3), 0, 8, ylab = "", xlab = "h",
-              col = "darkblue",add = F, bty = 'n', ylim = c(0, 10),
-              main = stringr::str_to_upper(model), lwd = 2, xaxt = 'n', yaxt = 'n')
-        abline(v = 1.5, col = 'darkred', lty = 'dotted')
-        abline(h = 5, col = 'darkred', lty = 'dotted')
-      }))
-    par(old)
+    old <- par(mfrow = c(5,5), mar = c(0.4, 0.4, 1.4, 0.4), ask = FALSE)
+    on.exit(par(old))
+    h <- seq(0, 8, length.out = 101)
+    for (model in names(models)) {
+      plot(h, models[[model]](h, rango = 1.5, sigma = 5, alpha1 = 1.3), type = 'l',
+           ylab = "", xlab = "h", col = "darkblue", bty = 'n', ylim = c(0, 10),
+           main = toupper(model), lwd = 2, xaxt = 'n', yaxt = 'n')
+      abline(v = 1.5, col = 'darkred', lty = 'dotted')
+      abline(h = 5, col = 'darkred', lty = 'dotted')
+    }
   } else {
-    arguments <- lapply(models, (\(x) paste0(names(formals(x)), collapse = ', '))) |>
-      do.call(what = rbind)
+    arguments <- do.call(rbind, lapply(models, function(x) paste0(names(formals(x)), collapse = ', ')))
     colnames(arguments) <- c('arguments')
     print(arguments)
   }

@@ -74,4 +74,7 @@
 #' (2nd ed.). Springer. \doi{10.1007/b98888}
 #'
 #' @keywords internal
+#' @importFrom graphics abline axis box image layout lines mtext par plot.new points text
+#' @importFrom grDevices hcl.colors
+#' @importFrom stats predict
 "_PACKAGE"

@@ -25,7 +25,7 @@ Los conceptos y algoritmos de modelamiento geoestadístico funcional no reciben 
 
 ## Estado actual
 
-El flujo de predicción está completo y es un paquete instalable, con documentación de todas las funciones y 233 pruebas automáticas (`testthat`).
+El flujo de predicción está completo y es un paquete instalable, con documentación de todas las funciones y 335 pruebas automáticas (`testthat`).
 
 | Paso | Función | Qué hace |
 |:-----|:--------|:---------|
@@ -34,18 +34,18 @@ El flujo de predicción está completo y es un paquete instalable, con documenta
 | Exportar los *scores* | `togstat()` | Deja los *scores* listos para estimar y ajustar variogramas con `gstat`. |
 | Registrar modelos | `add_model()`, `toSpatFD()` | Traduce los modelos ajustados con `gstat`, los compila y los guarda dentro del objeto. Un objeto puede guardar varios modelos. |
 | Modelos de variograma | `models()`, `availablemodels()` | 18 modelos espejo de los de `gstat`, que reproducen sus valores. |
-| Predicción | `predict()` | Kriging simple (sin variogramas cruzados) o cokriging simple (con ellos) en sitios nuevos o sobre un mapa `sf`. Métodos `"scores"` y `"lambda"`. |
+| Predicción | `predict()` | Kriging (sin variogramas cruzados) o cokriging (con ellos), ordinario o simple, en sitios nuevos o sobre un mapa `sf`. Método `"scores"` (kriging de los *scores*) o `"lambda"` (combinación de las curvas observadas; con variogramas cruzados entre variables es cokriging funcional). |
 | Resultados | `print()`, `plot()` | Curvas predichas, varianza de predicción y mapas de ambas. |
 | Validación cruzada | `leave_one_out()` | Compara modelos y métodos dejando por fuera un sitio a la vez. |
 
 Datos incluidos: `air_mexico` (PM10 y NO2 en Ciudad de México), `air_bogota` (PM10 en Bogotá) y `vowels`.
 
-Los resultados coinciden con los de `gstat` y con los de la versión CRAN (`KS_scores_lambdas()`, `crossval_loo()`), con diferencias relativas entre 10⁻¹⁶ y 10⁻¹³. La comparación está en [`dev/02_comparacion_gstat.R`](dev/02_comparacion_gstat.R).
+Por defecto la predicción es por kriging ordinario: la media es una constante desconocida, así que da lo mismo que las curvas estén centradas o no, y se pueden usar modelos sin meseta. Con `kriging = "simple"` la media es cero, como en la versión CRAN. Los resultados del método `"scores"` coinciden con el kriging simple y con el ordinario de `gstat`, y con la versión CRAN (`KS_scores_lambdas()`, `crossval_loo()`) en el caso simple, con diferencias relativas entre 10⁻¹⁶ y 10⁻¹³. El método `"lambda"` ya no sigue a la versión CRAN: usa las mesetas del modelo, y sus dos versiones coinciden con las fórmulas escritas con las covarianzas de `gstat`. La comparación está en [`dev/02_comparacion_gstat.R`](dev/02_comparacion_gstat.R).
 
 ### Limitaciones conocidas
 
-- **Solo kriging simple.** Los modelos sin meseta (`linear`, `power`, `logarithmic`, `spline`, `legendre`) no se pueden usar hasta que exista kriging ordinario.
-- **Método `"lambda"`** implementado igual que en la versión CRAN para poder compararlos: una sola variable, sin variogramas cruzados y con las curvas sin centrar. Sus curvas y varianzas no son comparables hoy con las del método `"scores"`.
+- **Media constante.** El kriging ordinario estima una media constante; todavía no hay kriging universal (media con tendencia espacial).
+- **Método `"lambda"` con varias variables**: solo combina las curvas en los tiempos que comparten, así que el `t` de `spatfd()` debe estar en una escala común. Con intervalos distintos predice sobre el común (en los datos de México, PM10 tiene 4344 instantes y NO2 4292, y se supone que empiezan a la misma hora).
 - **Solo se traen modelos de `gstat`**, y la anisotropía se descarta en la traducción.
 - **Vecindario global y distancias euclidianas**: sirve para coordenadas proyectadas y un número moderado de sitios.
 - Todavía no se han migrado desde la versión CRAN el **muestreo óptimo**, la **clasificación** ni la **simulación**.
@@ -80,10 +80,11 @@ no2  <- spatfd(no2_mexico, coords = as.matrix(coords_no2_mexico),
 
 aire <- pm10 + no2
 summary(aire)
-#> |     |basis   | no. PC|  variance|
-#> |:----|:-------|------:|---------:|
-#> |PM10 |fourier |      2| 0.9564145|
-#> |NO2  |fourier |      2| 0.9658895|
+#> --------- PCA information ----------
+#>        basis no. PC  variance
+#> PM10 fourier      2 0.9564145
+#> NO2  fourier      2 0.9658895
+#> ------------------------------------
 
 # 2. Variogramas de los scores, por fuera del paquete (aquí con gstat):
 #    un modelo lineal de corregionalización para PM10 y NO2
@@ -96,49 +97,54 @@ inicial <- vgm(100,      "Nug",        0, add.to = inicial)
 lmc <- fit.lmc(v = vario, g = scores, model = inicial,
                fit.method = 6, correct.diagonal = 1.01)
 
-# 3. Registrar los modelos en el objeto (se modifica en el sitio, sin reasignar)
-add_model(aire, lmc, name = "lmc")
-add_model(aire, list(                                 # solo PM10, sin variogramas cruzados
-  PM10.PC1 = vgm(200000, "Exp", 8000, nugget = 20000),
-  PM10.PC2 = vgm(60000,  "Sph", 15000)), name = "pm10")
+# 3. Registrar los modelos en el objeto (devuelve el objeto actualizado, como update())
+aire <- aire |>
+  add_model(lmc, name = "lmc") |>
+  add_model(list(                                     # solo PM10, sin variogramas cruzados
+    PM10.PC1 = vgm(200000, "Exp", 8000, nugget = 20000),
+    PM10.PC2 = vgm(60000,  "Sph", 15000)), name = "pm10")
 
 aire$models
 #>      variables                     structures no. scores cross    sill
 #> lmc  NO2, PM10                   wave, nugget          4  TRUE 1214940
 #> pm10      PM10 nugget, exponential, spherical          2 FALSE  280000
 
-# 4. Predicción en sitios nuevos: el modelo 'lmc' tiene variogramas cruzados -> cokriging
+# 4. Predicción en sitios nuevos: el modelo 'lmc' tiene variogramas cruzados -> cokriging.
+#    Por defecto es kriging ordinario; con kriging = "simple", la media de los scores es cero.
 sitios <- cbind(X = c(480000, 490000, 500000),
                 Y = c(2140000, 2150000, 2160000))
 
 pred <- predict(aire, sitios, model = "lmc")
 pred
 #> Predicted curves at 3 sites for: NO2, PM10
+#> Method: scores, ordinary kriging, with cross-variograms
 #>
 #> Prediction variance:
 #>           NO2     PM10
-#> new1 136215.2 391284.1
-#> new2 134464.4 383923.9
-#> new3 163365.7 423869.8
+#> new1 136630.6 402843.9
+#> new2 135366.3 395450.2
+#> new3 169406.6 443848.3
 
-pred$PM10$pred                  # curvas predichas (objeto fd del paquete fda)
+pred$PM10$pred                  # curvas predichas: una fila por tiempo, una columna por sitio
 plot(pred, variable = "PM10")   # predichas en color sobre las observadas en gris
 
-# 5. Predicción sobre un mapa: dibuja la predicción y su varianza lado a lado
+# 5. Predicción sobre un mapa: plot() dibuja la predicción y su varianza lado a lado
 mapa <- predict(aire, map_mexico, model = "lmc", variable = "PM10", n = 2000)
+plot(mapa)
 plot(mapa, time = 1000, main = "PM10")   # el mismo mapa en otro instante
 
 # 6. Comparación de modelos y métodos por validación cruzada
 leave_one_out(aire, variable = "PM10")
-#> 13 sites, error = distance between the observed and the predicted curve
+#> 13 sites, ordinary kriging, error = distance between the observed and the predicted curve
 #>
-#>   model method crossed      mean       sd      max
-#> 1  pm10 scores   FALSE  562.5793 357.8272 1450.067
-#> 2   lmc scores    TRUE  586.4860 292.8836 1400.169
-#> 3  pm10 lambda   FALSE 1573.8488 804.0448 3192.140
+#>   model method crossed     mean       sd      max
+#> 1   lmc lambda    TRUE 486.1857 272.8846 1147.095
+#> 2  pm10 scores   FALSE 556.2050 355.3138 1459.726
+#> 3  pm10 lambda   FALSE 563.4934 353.2229 1467.241
+#> 4   lmc scores    TRUE 595.5434 279.3465 1369.052
 ```
 
-El modelo `pm10` usa parámetros fijos, solo como ilustración. Un recorrido más completo, paso a paso, está en [`dev/01_uso_paquete.R`](dev/01_uso_paquete.R).
+El modelo `pm10` usa parámetros fijos, solo como ilustración. Con el modelo `lmc`, el método `"lambda"` es cokriging funcional y solo cubre las horas comunes a PM10 y NO2, así que su error no es directamente comparable con el de los demás. Un recorrido más completo, paso a paso, está en [`dev/01_uso_paquete.R`](dev/01_uso_paquete.R).
 
 ## Roadmap / TODO
 
@@ -148,15 +154,14 @@ El modelo `pm10` usa parámetros fijos, solo como ilustración. Un recorrido má
 - ~~Exportación de los *scores* a `gstat` y traducción de los modelos ajustados.~~
 - ~~Estructura de paquete y registro de modelos dentro del objeto.~~
 - ~~Predicción univariada (kriging) y multivariada (cokriging) con *solver* propio.~~
-- ~~Método `lambda` univariado.~~
+- ~~Kriging ordinario (por defecto), que admite modelos sin meseta.~~
+- ~~Método `lambda` univariado, centrado, y cokriging funcional con varias variables.~~
 - ~~Salida de la predicción: resumen, gráficos de curvas y mapas.~~
 - ~~Datos y ejemplos incluidos en el paquete.~~
 - ~~Validación cruzada dejando un sitio por fuera.~~
 
 ### Pendiente
 
-- Kriging ordinario, necesario para los modelos sin meseta.
-- Método `lambda` centrado y su extensión multivariada (propuesta en [`dev/diseno_solver.pdf`](dev/diseno_solver.pdf)).
 - Traductores para modelos ajustados con otras herramientas (`geoR`, modelos personalizados).
 - Muestreo óptimo.
 - Clasificación y simulación de datos funcionales espacialmente correlacionados.
@@ -173,7 +178,7 @@ devtools::load_all()   # cargar el paquete desde el repositorio
 devtools::test()       # correr las pruebas
 ```
 
-La carpeta [`dev/`](dev) contiene los scripts de uso y de comparación con `gstat`, y los documentos técnicos de la implementación.
+La carpeta [`dev/`](dev) contiene los scripts de uso y de comparación con `gstat`, y los documentos técnicos de la implementación. Para entender cómo está construido el paquete (archivos, estructura del objeto, recorrido de una predicción y cómo extenderlo), el punto de partida es [`dev/estructura_paquete.pdf`](dev/estructura_paquete.pdf).
 
 ## Referencias
 

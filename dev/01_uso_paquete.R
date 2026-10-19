@@ -87,19 +87,19 @@ ajuste_lmc <- fit.lmc(v = vario_todos, g = scores_todos,
 # --------------------------------------------------------------------------------------------------
 # add_model() guarda el modelo dentro del objeto SpatFD, listo para predecir.
 #   - Recibe directamente lo que devuelve gstat.
-#   - Modifica el objeto en el sitio: no hay que reasignarlo.
+#   - Como cualquier función de modelado de R, devuelve el objeto actualizado: hay que reasignarlo.
 #   - Un objeto puede guardar varios modelos, para compararlos después.
 #   - Si no se da un nombre, se nombran en secuencia: model 1, model 2, ...
 
-add_model(pm10.no2, ajuste_pm10)                     # queda como 'model 1'
-add_model(pm10.no2, ajuste_lmc, name = "lmc wave")
+pm10.no2 <- pm10.no2 |>
+  add_model(ajuste_pm10) |>                          # queda como 'model 1'
+  add_model(ajuste_lmc, name = "lmc wave")
 
 # Tabla resumen de los modelos del objeto
 pm10.no2$models
 
 # Opcional: toSpatFD() muestra cómo queda un modelo en el formato propio del paquete
 toSpatFD(ajuste_pm10)
-
 
 # --------------------------------------------------------------------------------------------------
 #                                 5. PREDICCIÓN EN SITIOS NUEVOS
@@ -111,8 +111,20 @@ toSpatFD(ajuste_pm10)
 #
 # Hay dos métodos de predicción (argumento 'method'):
 #   - "scores" (por defecto) -> predice los scores y reconstruye la curva con ellos
-#   - "lambda"               -> la curva es una combinación lineal de las curvas observadas.
-#                               Por ahora solo para una variable y sin variogramas cruzados.
+#   - "lambda"               -> la curva es la media más una combinación lineal de las curvas
+#                               observadas (centradas). Con variogramas cruzados entre variables
+#                               es cokriging funcional: las curvas de NO2 ayudan a predecir PM10.
+#
+# Y dos tipos de kriging (argumento 'kriging'):
+#   - "ordinary" (por defecto) -> la media es una constante desconocida. Los pesos de cada variable
+#                                 suman 1, así que da lo mismo centrar o no las curvas, y se pueden
+#                                 usar modelos sin meseta (linear, power, ...).
+#   - "simple"                 -> la media es conocida e igual a cero, como la de los scores.
+#
+# Para combinar las curvas de dos variables, lambda necesita que compartan los tiempos. Aquí PM10
+# tiene 4344 instantes y NO2 4292, ambos con t = 1, 2, ...: lambda supone que empiezan a la misma
+# hora y predice sobre el intervalo común [1, 4292], con un mensaje. Si los tiempos reales fueran
+# otros, habría que darlos en 't' al crear los objetos con spatfd().
 
 sitios_nuevos <- expand.grid(X = seq(478000, 505000, length.out = 3),
                              Y = seq(2135000, 2175000, length.out = 3))
@@ -121,6 +133,8 @@ rownames(sitios_nuevos) <- paste0("S", seq_len(nrow(sitios_nuevos)))
 pred_kriging   <- predict(pm10.no2, sitios_nuevos, model = "model 1")
 pred_cokriging <- predict(pm10.no2, sitios_nuevos, model = "lmc wave")
 pred_lambda    <- predict(pm10.no2, sitios_nuevos, model = "model 1", method = "lambda")
+pred_cok_lamb  <- predict(pm10.no2, sitios_nuevos, model = "lmc wave", method = "lambda")
+pred_simple    <- predict(pm10.no2, sitios_nuevos, model = "model 1", kriging = "simple")
 
 # Si el modelo no sirve para lo que se pide, el error muestra la tabla de modelos:
 try(predict(pm10.no2, sitios_nuevos))                                        # falta escoger uno
@@ -131,14 +145,15 @@ try(predict(pm10.no2, sitios_nuevos, model = "model 1", variable = "NO2"))   # n
 #                                        6. RESULTADOS
 # --------------------------------------------------------------------------------------------------
 # Toda predicción es una lista con un elemento por variable:  <predicción>$<variable>
-#   $pred  curvas predichas (objeto fd del paquete fda), una por sitio nuevo
+#   $pred  curvas predichas: una matriz con una fila por tiempo y una columna por sitio nuevo,
+#          igual que los datos de entrada (no hace falta saber nada del paquete fda)
 #   $var   varianza de predicción de la curva en cada sitio nuevo
 
 pred_kriging                  # Resumen: sitios, variables y varianza de predicción
 names(pred_cokriging)         # El cokriging predice PM10 y NO2
 
-pred_cokriging$NO2$pred       # Curvas predichas de NO2
-pred_cokriging$NO2$var        # Su varianza de predicción
+pred_cokriging$NO2$pred[1:5, ]   # Curvas predichas de NO2 (primeros 5 tiempos)
+pred_cokriging$NO2$var           # Su varianza de predicción
 
 # plot() dibuja las curvas predichas (en color) sobre las curvas observadas (en gris)
 par(mfrow = c(1, 2))
@@ -152,21 +167,36 @@ plot(pred_kriging, variable = "PM10", lwd = 0.5, main = "PM10 - Método scores")
 plot(pred_lambda,  variable = "PM10", lwd = 0.5, main = "PM10 - Método lambda", col = "darkgreen")
 par(mfrow = c(1, 1))
 
+# Cokriging funcional (lambda con el modelo lineal de corregionalización): solo cubre los tiempos
+# comunes a PM10 y NO2
+dim(pred_cok_lamb$PM10$pred)
+plot(pred_cok_lamb, variable = "PM10", lwd = 0.5, main = "PM10 - Cokriging funcional", col = "purple")
+
 # Comparación de modelos y métodos: varianza de predicción de PM10 en cada sitio nuevo
-cbind(kriging   = pred_kriging$PM10$var,
-      cokriging = pred_cokriging$PM10$var,
-      lambda    = pred_lambda$PM10$var)
+cbind(kriging           = pred_kriging$PM10$var,
+      kriging_simple    = pred_simple$PM10$var,
+      cokriging         = pred_cokriging$PM10$var,
+      lambda            = pred_lambda$PM10$var,
+      cokriging_lambda  = pred_cok_lamb$PM10$var)
+
+# Con kriging ordinario se pueden usar modelos sin meseta, por ejemplo uno lineal con pepita
+pm10.no2 <- add_model(pm10.no2, list(PM10.PC1 = vgm(30, "Lin", 0, nugget = 20000),
+                                     PM10.PC2 = vgm(10, "Lin", 0, nugget = 5000)),
+                      name = "lineal")
+predict(pm10.no2, sitios_nuevos, model = "lineal")
+try(predict(pm10.no2, sitios_nuevos, model = "lineal", kriging = "simple"))   # error: sin meseta
 
 
 # --------------------------------------------------------------------------------------------------
 #                                    7. PREDICCIÓN SOBRE UN MAPA
 # --------------------------------------------------------------------------------------------------
 # Si en lugar de sitios se entrega un mapa (objeto sf), predict() predice en una grilla regular
-# de puntos dentro del mapa y dibuja dos mapas lado a lado: la predicción y su varianza.
+# de puntos dentro del mapa. plot() dibuja dos mapas lado a lado: la predicción y su varianza.
 #   - n     -> número aproximado de puntos de la grilla
 #   - Los puntos blancos son las estaciones donde se midió la variable.
 
 pred_mapa <- predict(pm10.no2, map_mexico, model = "lmc wave", variable = "PM10", n = 15000)
+plot(pred_mapa)
 
 # Una curva solo se puede mostrar en un mapa en un instante: se escoge con 'time'.
 # La varianza es la de toda la curva, así que su mapa no cambia.
@@ -195,6 +225,8 @@ leave_one_out(pm10.no2, variable = "PM10",
               design = data.frame(model  = c("model 1", "lmc wave"),
                                   method = c("scores",  "scores")))
 
-# Curvas predichas al dejar por fuera cada estación (en color) frente a las observadas (en gris)
-plot(attr(pm10.no2, "fd")$PM10, col = "grey70", lty = 1, main = "PM10 - Validación cruzada (lmc wave)")
-lines(validacion$pred[["lmc wave / scores"]], col = "darkred", lty = 1, lwd = 0.5)
+# Curvas predichas al dejar por fuera cada estación (en color) frente a las observadas (en gris).
+# Son matrices tiempos x estaciones, así que se grafican con matplot().
+matplot(pm10_mexico, type = "l", lty = 1, col = "grey70",
+        xlab = "Tiempo", ylab = "PM10", main = "PM10 - Validación cruzada (lmc wave)")
+matlines(validacion$pred[["lmc wave / scores"]], lty = 1, lwd = 0.5, col = "darkred")

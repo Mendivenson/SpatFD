@@ -23,12 +23,10 @@
 #'   use, that model is replaced.
 #'
 #' @details
-#' The model is added to `sfd` **in place**: there is no need to assign the
-#' result. The compiled models live in the attribute `models`, an environment
-#' like the other attributes of the object (see [spatfd()]), so copies of the
-#' object made with `<-` share the same models.
+#' Like any other modelling function in R, `add_model()` returns the updated
+#' object, so the result must be assigned: `sfd <- add_model(sfd, model)`.
 #'
-#' `sfd$models` shows a summary table of the registered models, with one row
+#' `sfd$models` is the summary table of the registered models, with one row
 #' per model and the columns
 #' \describe{
 #'   \item{`variables`}{Functional variables the model covers.}
@@ -38,11 +36,7 @@
 #'   \item{`sill`}{Sum of the sills of the direct variograms.}
 #' }
 #'
-#' Each entry of `attr(sfd, "models")` is a list with the table of the model
-#' (`table`), the compiled variograms (`variograms`, a named list of functions
-#' of the distance `h`) and their sills (`sills`).
-#'
-#' @return `sfd`, invisibly.
+#' @return `sfd` with the model added.
 #'
 #' @section Theory:
 #' A variogram is usually modelled as a nested sum of basic structures, each
@@ -75,20 +69,17 @@
 #'   alpha1 = c(NA, NA, NA)
 #' )
 #'
-#' add_model(sfd, df)
-#' add_model(sfd, df[df$model != "nugget", ], name = "no nugget")
+#' sfd <- add_model(sfd, df)
+#' sfd <- add_model(sfd, df[df$model != "nugget", ], name = "no nugget")
 #'
 #' # Fitted models of gstat are translated on the way in
 #' fitted <- list(
 #'   "sim.PC1" = gstat::vgm(psill = 30, model = "Sph", range = 0.5),
 #'   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Sph", range = 0.5)
 #' )
-#' add_model(sfd, fitted, name = "spherical")
+#' sfd <- add_model(sfd, fitted, name = "spherical")
 #'
 #' sfd$models
-#'
-#' vg <- attr(sfd, "models")[["model 1"]]$variograms
-#' vg$sim.PC1(c(0, 0.1, 0.5, 2))
 #'
 #' @export
 add_model <- function(sfd, model, name = NULL){
@@ -120,111 +111,48 @@ add_model <- function(sfd, model, name = NULL){
          '. See availablemodels(txt = TRUE)', call. = FALSE)
   }
 
-  # REGISTRO: El modelo se guarda en el entorno del atributo 'models', por lo
-  # que el objeto se modifica en el sitio
-  registry <- attr(sfd, 'models')
-  index    <- vapply(as.list(registry), function(m) m$index, numeric(1))
-
+  # REGISTRO: Un nombre repetido reemplaza el modelo sin cambiar su posición
+  registry <- get_models(sfd)
   if (is.null(name)) {
-    name <- next_model_name(registry)
-  } else if (name %in% names(index)) {
+    name <- next_model_name(names(registry))
+  } else if (name %in% names(registry)) {
     message("Replacing the model '", name, "'")
   }
 
   registry[[name]] <- list(
-    index      = if (name %in% names(index)) index[[name]] else max(0, index) + 1,
     table      = df,
     variograms = compile_model(df),
     sills      = vapply(split(df$sigma, df$var), sum, numeric(1))
   )
 
-  invisible(sfd)
+  set_models(sfd, registry)
 }
 
 # .............................. FUNCIONES INTERNAS ................................................
 
-# NOMBRES SECUENCIALES: model 1, model 2, ... saltando los nombres ya usados
-next_model_name <- function(registry){
-  k <- length(ls(registry)) + 1
-  while (exists(paste('model', k), envir = registry, inherits = FALSE)) k <- k + 1
-  paste('model', k)
-}
-
-# SCORES DEL OBJETO: Vector con la variable a la que pertenece cada score,
-# nombrado con el id del score (<variable>.PC1, <variable>.PC2, ...)
-score_ids <- function(sfd){
-  variables <- var_names(sfd)
-  ids <- lapply(variables, function(v) {
-    paste0(v, '.PC', seq_len(ncol(attr(sfd, 'pca')[[v]]$scores)))
-  })
-  stats::setNames(rep(variables, lengths(ids)), unlist(ids))
-}
-
-# TABLA RESUMEN DE LOS MODELOS REGISTRADOS: Es lo que el usuario ve en sfd$models
-model_table <- function(sfd){
-  ids     <- score_ids(sfd)
-  entries <- as.list(attr(sfd, 'models'))
-  entries <- entries[order(vapply(entries, function(m) m$index, numeric(1)))]
-
-  rows <- lapply(entries, function(m) {
-    direct <- intersect(names(ids), m$table$var)
-    data.frame('variables'  = paste(unique(ids[direct]), collapse = ', '),
-               'structures' = paste(unique(m$table$model), collapse = ', '),
-               'no. scores' = length(direct),
-               'cross'      = !all(m$table$var %in% names(ids)),
-               'sill'       = sum(m$sills[direct]),
-               check.names = F)
-  })
-
-  if (length(rows) == 0) {
-    return(data.frame('variables' = character(0), 'structures' = character(0),
-                      'no. scores' = integer(0), 'cross' = logical(0),
-                      'sill' = numeric(0), check.names = F))
-  }
-
-  rows <- do.call(rbind, rows)
-  rownames(rows) <- names(entries)
-  rows
-}
-
-# COMPILACIÓN: Una función de la distancia por cada id de variograma en df$var
+# COMPILACIÓN: Una función de la distancia por cada id de variograma en
+# df$var, que suma las estructuras de ese variograma. Cada estructura es el
+# modelo de 'models' con sus parámetros fijos; los parámetros en NA quedan en
+# el valor por defecto del modelo.
 compile_model <- function(df){
+  params <- setdiff(colnames(df), c('var', 'model'))
+  ids    <- unique(df$var)
 
-  # Función para fijar los argumentos de una función dada
-  fix_args <- function(f, args_to_fix) {
-    new_f <- f
-    body(new_f) <- do.call(substitute, list(body(f), args_to_fix))
-    formals(new_f) <- formals(f)[!names(formals(f)) %in% names(args_to_fix)]
-    environment(new_f) <- globalenv()
-    new_f
-  }
+  variograms <- lapply(ids, function(v) {
+    rows <- df[df$var == v, , drop = FALSE]
 
-  # Función para forzar la suma de funciones como una nueva función
-  combine_models <- function(componentes) {
-    llamadas <- lapply(componentes, function(fn) as.call(list(fn, quote(h))))
-    expr_suma <- Reduce(function(a, b) bquote(.(a) + .(b)), llamadas)
+    structures <- lapply(seq_len(nrow(rows)), function(i) {
+      model <- models[[as.character(rows$model[i])]]
+      args  <- as.list(rows[i, params, drop = FALSE])
+      args  <- args[!vapply(args, is.na, logical(1))]
 
-    f <- function(h) NULL
-    body(f) <- expr_suma
-    environment(f) <- globalenv()
-    f
-  }
-
-  all_models = list()
-  for (v in unique(df$var)){
-    model <- df[df$var == v,]
-
-    componentes <- lapply(seq_len(nrow(model)), function(i) {
-      x <- as.list(model[i, ])
-      m <- x$model
-      params <- x[setdiff(names(x), c('model', 'var'))]
-      params <- params[!vapply(params, is.na, logical(1))]  # quitar NA (params que ese modelo no usa)
-      componente <- fix_args(models[[m]], params)
-      componente(numeric(0))  # Parámetros inválidos fallan aquí y no al evaluar
-      componente
+      component <- function(h) do.call(model, c(list(h), args))
+      component(numeric(0))          # Parámetros inválidos fallan aquí y no al evaluar
+      component
     })
 
-    all_models[[v]] = combine_models(componentes)
-  }
-  all_models
+    function(h) Reduce(`+`, lapply(structures, function(component) component(h)))
+  })
+
+  stats::setNames(variograms, ids)
 }

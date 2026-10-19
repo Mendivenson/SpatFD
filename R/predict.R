@@ -29,11 +29,10 @@
 #'   several variables their scores are predicted jointly.
 #' @param method Prediction method, a single one per call: `"scores"` (the
 #'   default) or `"lambda"`. See Details and Theory.
+#' @param kriging Type of kriging: `"ordinary"` (the default), with an unknown
+#'   constant mean, or `"simple"`, with a known mean of zero. See Details.
 #' @param n Only when `newcoords` is a map: approximate number of points of
 #'   the grid on which the curves are predicted.
-#' @param plot Only when `newcoords` is a map: if `TRUE` (the default), the
-#'   maps of the prediction and of its variance are drawn side by side, see
-#'   [plot.SpatFDpred()].
 #' @param ... Ignored.
 #'
 #' @details
@@ -47,44 +46,67 @@
 #' every prediction. If the model cannot be used, the error shows the summary
 #' table of the models of the object.
 #'
-#' Simple kriging works with covariances, so every model must have a sill:
-#' `linear`, `power`, `logarithmic`, `spline` and `legendre` cannot be used.
+#' By default the systems are solved by ordinary kriging: the mean is an
+#' unknown constant, so the predictions do not depend on the curves being
+#' centred, and models without a sill (`linear`, `power`, `logarithmic`,
+#' `spline` and `legendre`) can be used. With `kriging = "simple"` the mean is
+#' known and equal to zero, as the scores are centred; every model must then
+#' have a sill.
 #'
-#' The method `"lambda"` reproduces the predictor of the CRAN version of the
-#' package and has, for now, these limitations:
-#' * It predicts a single variable with a model without cross-variograms; any
-#'   other case is an error.
-#' * The weights are applied to the observed curves as they are, without
-#'   removing their mean first.
-#' * The variance of each score is taken from the eigenvalue of its principal
-#'   component, not from the sill of the fitted model, so the prediction
-#'   variance can be negative when the two differ much.
+#' With the method `"lambda"` the curves of every variable in `variable` take
+#' part in the prediction of each one (functional cokriging). The curves of two
+#' variables are related through the cross-variograms between their scores; a
+#' model without them predicts each variable on its own. The cross-variograms
+#' between scores of the same variable play no role in this method.
+#'
+#' The curves of several variables can only be combined over the times they
+#' share, so the `t` given to [spatfd()] must be on a common scale (for
+#' example, hours since the same origin). When the variables span different
+#' intervals, the method `"lambda"` predicts the curves over the common one
+#' and says so with a message; the method `"scores"` is not affected.
 #'
 #' @return An object of class `SpatFDpred`: a list with one element per
 #' predicted variable, named after it, each with
 #' \describe{
-#'   \item{`pred`}{Predicted curves, as a functional data object of \pkg{fda}
-#'     with one curve per prediction site.}
-#'   \item{`var`}{Prediction variance of the curve at each prediction site:
-#'     the sum of the prediction variances of its scores.}
+#'   \item{`pred`}{Predicted curves, as a matrix with one row per time of the
+#'     observed data (the `t` given to [spatfd()]) and one column per
+#'     prediction site, the same layout as the data given to [spatfd()]. With
+#'     the method `"lambda"` and variables observed over different intervals,
+#'     only the times of the common interval.}
+#'   \item{`var`}{Prediction variance of the curve at each prediction site,
+#'     \eqn{E \| \chi_{s_0} - \hat{\chi}_{s_0} \|^2}.}
 #' }
 #' The list always has this form, also when a single variable is predicted.
 #' The coordinates of the prediction sites are kept in the attribute
-#' `newcoords`. When the prediction is made over a map and the maps are
-#' drawn, the object is returned invisibly.
+#' `newcoords`.
 #'
-#' The predictions can be plotted with [plot()][plot.SpatFDpred].
+#' The predictions can be plotted with [plot()][plot.SpatFDpred]: as curves
+#' or, when the prediction was made over a map, as maps of the prediction and
+#' of its variance.
 #'
 #' @section Theory:
-#' The scores are centred, so they are predicted by simple kriging with a
-#' known mean of zero. Let \eqn{f} be the vector with the observed scores, of
-#' all the components and variables involved, \eqn{\Sigma} its covariance
-#' matrix and \eqn{c_0} its covariance with the score \eqn{f_k(s_0)} at the
-#' unsampled site \eqn{s_0}. The predictor and its variance are
-#' \deqn{\hat{f}_k(s_0) = c_0^T \Sigma^{-1} f, \qquad
-#'   \sigma_k^2(s_0) = C_k(0) - c_0^T \Sigma^{-1} c_0}
+#' Let \eqn{f} be the vector with the observed scores, of all the components
+#' and variables involved, \eqn{\Sigma} its covariance matrix and \eqn{c_0} its
+#' covariance with the score \eqn{f_k(s_0)} at the unsampled site \eqn{s_0}.
+#' The scores are centred, so with simple kriging their mean is known and
+#' equal to zero, and the predictor and its variance are
+#' \deqn{\hat{f}_k(s_0) = \lambda^T f, \quad \Sigma \lambda = c_0, \qquad
+#'   \sigma_k^2(s_0) = C_k(0) - c_0^T \lambda}
 #' The covariances come from the fitted variograms, \eqn{C(h) = C(0) -
 #' \gamma(h)}, where \eqn{C(0)} is the sum of the partial sills.
+#'
+#' Ordinary kriging takes the mean of each field as an unknown constant. The
+#' weights of the field being predicted must add up to one and those of every
+#' other field to zero (ordinary cokriging), which adds one Lagrange
+#' multiplier \eqn{\mu} per field:
+#' \deqn{\begin{pmatrix} \Sigma & F \\ F^T & 0 \end{pmatrix}
+#'   \begin{pmatrix} \lambda \\ \mu \end{pmatrix} =
+#'   \begin{pmatrix} c_0 \\ e \end{pmatrix}, \qquad
+#'   \sigma_k^2(s_0) = C_k(0) - c_0^T \lambda - e^T \mu}
+#' where \eqn{F} marks the observations of each field and \eqn{e} the field
+#' being predicted. Under these constraints, adding a constant to a block of
+#' covariances changes neither the weights nor the variance, so models without
+#' a sill are used through \eqn{C(h) = -\gamma(h)} (Chilès and Delfiner, 2012).
 #'
 #' \eqn{\Sigma} is made of one block per pair of scores. Without
 #' cross-variograms it is block diagonal and the system splits into one
@@ -95,19 +117,31 @@
 #' variances of the scores measures the uncertainty of the whole curve.
 #'
 #' The method `"lambda"` predicts the curve directly as a linear combination
-#' of the observed curves, with one scalar weight per observed site (Giraldo,
-#' Delicado and Mateu, 2011):
-#' \deqn{\hat{\chi}_{s_0}(t) = \sum_{i=1}^{n} \lambda_i \chi_{s_i}(t)}
-#' The weights minimise \eqn{E \| \chi_{s_0} - \hat{\chi}_{s_0} \|^2} and
-#' solve \eqn{\Omega \lambda = c}, where \eqn{\Omega = \sum_k \Omega_k} and
-#' \eqn{c = \sum_k c_k} add up, over the scores, the covariance matrices
-#' between observed sites and the covariances with \eqn{s_0}. The prediction
-#' variance is
-#' \deqn{\sum_{k=1}^{K} \left( \eta_k - 2 c_k^T \lambda +
-#'   \lambda^T \Omega_k \lambda \right)}
-#' with \eqn{\eta_k} the eigenvalue of the \eqn{k}-th principal component.
-#' Unlike the method `"scores"`, the same weights are used for all the scores
-#' and the curves are not truncated to the first \eqn{K} components.
+#' of the observed curves, with one scalar weight per observed site and
+#' variable (Giraldo, Delicado and Mateu, 2011; Bohorquez, Giraldo and Mateu,
+#' 2017). For the variable \eqn{r},
+#' \deqn{\hat{\chi}^r_{s_0}(t) = \mu^r(t) + \sum_{p=1}^{P} \sum_{i=1}^{n_p}
+#'   \lambda^{rp}_i \left( \chi^p_{s_i}(t) - \mu^p(t) \right)}
+#' The weights minimise \eqn{E \| \chi^r_{s_0} - \hat{\chi}^r_{s_0} \|^2} and
+#' solve \eqn{\Omega \lambda = c}. \eqn{\Omega} has one block per pair of
+#' variables, made of the covariances between curves
+#' \deqn{E \langle \chi^p_{s}, \chi^q_{s'} \rangle = \sum_{k} \sum_{l}
+#'   G^{pq}_{kl} \, C_{pk,ql}(\| s - s' \|), \qquad
+#'   G^{pq}_{kl} = \int_T \xi^p_k(t) \, \xi^q_l(t) \, dt}
+#' where \eqn{C_{pk,ql}} is the covariance between the scores \eqn{f^p_k} and
+#' \eqn{f^q_l}, and \eqn{T} the interval common to the variables. For a
+#' variable observed over all of \eqn{T}, \eqn{G^{pp}} is the identity, because
+#' its eigenfunctions are orthonormal. \eqn{c} is built in the same way from
+#' the covariances with \eqn{s_0}, and the prediction variance is
+#' \eqn{E \langle \chi^r_{s_0}, \chi^r_{s_0} \rangle - c^T \lambda} (minus
+#' \eqn{e^T \mu} with ordinary kriging), which uses the sills of the fitted
+#' model. With ordinary kriging the weights of \eqn{r} add up to one and those
+#' of every other variable to zero, so the means cancel out and the predictor
+#' is the same whether the curves are centred or not:
+#' \eqn{\hat{\chi}^r_{s_0}(t) = \sum_{p} \sum_{i} \lambda^{rp}_i
+#' \chi^p_{s_i}(t)}. Unlike the method `"scores"`, the same weights are used
+#' for all the scores and the curves are not truncated to the first \eqn{K}
+#' components.
 #'
 #' @references
 #' Bohorquez, M., Giraldo, R. and Mateu, J. (2016). Optimal sampling for
@@ -137,12 +171,10 @@
 #' rownames(coords) <- colnames(dat)
 #' sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
 #'
-#' model <- toSpatFD(list(
+#' sfd <- add_model(sfd, list(
 #'   "sim.PC1" = gstat::vgm(psill = 30, model = "Exp", range = 0.5),
 #'   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Exp", range = 0.5)
-#' ))
-#'
-#' add_model(sfd, model, name = "exponential")
+#' ), name = "exponential")
 #' sfd$models
 #'
 #' pred <- predict(sfd, newcoords = cbind(x = c(0.2, 0.7), y = c(0.5, 0.5)), model = "exponential")
@@ -150,18 +182,21 @@
 #' pred$sim$var
 #' plot(pred)
 #'
-#' # The same prediction with the method lambda
+#' # The same model with the method lambda, and with simple kriging
 #' pred_lambda <- predict(sfd, newcoords = cbind(x = c(0.2, 0.7), y = c(0.5, 0.5)),
 #'                        model = "exponential", method = "lambda")
 #' plot(pred_lambda)
+#' predict(sfd, newcoords = cbind(x = c(0.2, 0.7), y = c(0.5, 0.5)),
+#'         model = "exponential", kriging = "simple")
 #'
-#' @importFrom utils capture.output
 #' @export
 predict.SpatFD <- function(object, newcoords, model = NULL, variable = NULL, method = 'scores',
-                           n = 5000, plot = TRUE, ...){
+                           kriging = 'ordinary', n = 5000, ...){
 
-  stopifnot("'method' must be a single string" = is.character(method) && length(method) == 1)
-  method <- match.arg(method, c('scores', 'lambda'))
+  stopifnot("'method' must be a single string" = is.character(method) && length(method) == 1,
+            "'kriging' must be a single string" = is.character(kriging) && length(kriging) == 1)
+  method  <- match.arg(method, c('scores', 'lambda'))
+  kriging <- match.arg(kriging, c('ordinary', 'simple'))
 
   # MAPAS: Si en lugar de sitios se recibe un mapa, se predice sobre una grilla
   # regular de puntos dentro de él
@@ -171,290 +206,60 @@ predict.SpatFD <- function(object, newcoords, model = NULL, variable = NULL, met
     newcoords <- map_grid(map, n)
   }
 
-  # Cada método entrega las curvas predichas y su varianza; los pasos
-  # intermedios (scores predichos, pesos) no se le entregan al usuario
+  # Cada método entrega las curvas predichas, evaluadas y como fd, y su
+  # varianza; los pasos intermedios (scores predichos, pesos) no se le
+  # entregan al usuario
   result <- switch(method,
-                   'scores' = predict_scores(object, newcoords, model, variable),
-                   'lambda' = predict_lambda(object, newcoords, model, variable))
+                   'scores' = predict_scores(object, newcoords, model, variable, kriging),
+                   'lambda' = predict_lambda(object, newcoords, model, variable, kriging))
 
-  # Además de las predicciones se guarda lo necesario para graficarlas: el mapa
-  # (si lo hay) y, por referencia, las curvas y los sitios observados
-  # También cómo se obtuvieron: el método y si se usaron variogramas cruzados
-  result <- structure(result$curves,
-                      class = 'SpatFDpred',
-                      newcoords = result$newcoords,
-                      method = method,
-                      crossed = result$crossed,
-                      map = map,
-                      fd = attr(object, 'fd'),
-                      coords = attr(object, 'data')$coords)
+  # El usuario recibe las curvas evaluadas en los tiempos observados. Las
+  # curvas funcionales quedan ocultas, solo para graficar.
+  variables <- names(result$curves)
+  out <- lapply(result$curves, function(curve) list(pred = curve$pred, var = curve$var))
 
-  if (!is.null(map) && plot) {
-    # Aquí la predicción todavía no tiene nombre: el título lleva el de la variable
-    if (length(result) > 1) message('Plotting the variable ', names(result)[1])
-    plot_maps(result, names(result)[1], time = NULL, main = NULL, label = names(result)[1])
-    return(invisible(result))
-  }
-  result
-}
-
-# FUNCIÓN DE IMPRESIÓN: Las curvas predichas (fd) no se imprimen, solo la
-#                       varianza de predicción en los primeros sitios
-
-#' @rdname predict.SpatFD
-#' @param x An object of class `SpatFDpred`, as returned by `predict()`.
-#' @export
-print.SpatFDpred <- function(x, ...){
-  sites <- nrow(attr(x, 'newcoords'))
-  shown <- min(sites, 10)
-
-  cat('\n\n-------------------------------------------------\n')
-  cat('Predicted curves at ', sites, ' sites', if (!is.null(attr(x, 'map'))) ' over a map',
-      ' for: ', paste(names(x), collapse = ', '), '\n', sep = '')
-  cat('\nPrediction variance:\n')
-  print(do.call(cbind, lapply(x, function(variable) variable$var[seq_len(shown)])))
-  if (shown < sites) cat('... and', sites - shown, 'more sites\n')
-  cat('-------------------------------------------------\n\n')
-  invisible(x)
-}
-
-# FUNCIÓN DE PLOTEO: La función plot.SpatFDpred() tiene dos modos:
-#                      'curves' -> Curvas predichas sobre las curvas observadas
-#                      'map'    -> Mapas de la predicción y de su varianza, lado
-#                                  a lado. Solo si se predijo sobre un mapa.
-
-#' Plot the predictions of a SpatFD object
-#'
-#' Plots the curves predicted by [predict()][predict.SpatFD] for one variable,
-#' either on top of the observed curves or, when the prediction was made over
-#' a map, as two maps side by side: the prediction and its variance.
-#'
-#' @param x An object of class `SpatFDpred`, as returned by
-#'   [predict()][predict.SpatFD].
-#' @param variable Name of the variable to plot. Defaults to the first
-#'   predicted variable.
-#' @param mode Either `"curves"`, to draw the predicted curves over the
-#'   observed ones, or `"map"`, to draw the maps of the prediction and of its
-#'   variance. Defaults to `"map"` when the prediction was made over a map and
-#'   to `"curves"` otherwise.
-#' @param time Only for `mode = "map"`: time at which the predicted curves are
-#'   evaluated to draw the prediction map. Defaults to the first time of the
-#'   curves.
-#' @param main Title of the plot. By default, for `mode = "map"` it is the
-#'   name of the object and the variable, for example `"pred$PM10"`.
-#' @param ... Graphical parameters. For `mode = "curves"` they are applied to
-#'   the predicted curves (for example `col` or `lwd`); for `mode = "map"`
-#'   only `col`, the colour palette of the maps, is used.
-#'
-#' @details
-#' With `mode = "map"` the plot has, from top to bottom: the title; a
-#' subtitle in a smaller font with the time, the prediction method and whether
-#' cross-variograms were used; a colour bar for each map with its scale; the
-#' two maps; and under each map what it shows (`Prediction` or `Variance`).
-#' The observed sites of the variable are drawn as white points.
-#'
-#' A predicted curve is a function of time, so a map can only show it at one
-#' time: the one given in `time`. The variance map does not depend on `time`,
-#' because the prediction variance is that of the whole curve.
-#'
-#' @return `x`, invisibly. Called for its side effect of drawing a plot.
-#'
-#' @seealso [predict()][predict.SpatFD]
-#'
-#' @examples
-#' set.seed(1)
-#' t <- 1:50
-#' dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(50, sd = 0.1))
-#' colnames(dat) <- paste0("s", 1:10)
-#' coords <- cbind(x = runif(10), y = runif(10))
-#' rownames(coords) <- colnames(dat)
-#' sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
-#'
-#' add_model(sfd, list(
-#'   "sim.PC1" = gstat::vgm(psill = 30, model = "Exp", range = 0.5),
-#'   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Exp", range = 0.5)
-#' ))
-#'
-#' # Predicted curves over the observed ones
-#' pred <- predict(sfd, newcoords = cbind(x = c(0.2, 0.7), y = c(0.5, 0.5)))
-#' plot(pred)
-#'
-#' # Prediction over a map: maps of the prediction and of its variance
-#' if (requireNamespace("sf", quietly = TRUE)) {
-#'   square <- sf::st_sfc(sf::st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 1), c(0, 0)))))
-#'
-#'   pred_map <- predict(sfd, newcoords = square, n = 400)
-#'   plot(pred_map, time = 25)
-#' }
-#'
-#' @importFrom graphics axis box image layout lines mtext plot.new points text
-#' @importFrom grDevices hcl.colors
-#' @export
-plot.SpatFDpred <- function(x, variable = NULL, mode = NULL, time = NULL, main = NULL, ...){
-
-  # Nombre con el que el usuario llamó a la predicción, para el título
-  name <- deparse(substitute(x))
-  if (length(name) > 1 || nchar(name[1]) > 30) name <- 'prediction'
-
-  if (is.null(variable)) {
-    variable <- names(x)[1]
-    if (length(x) > 1) message('Plotting the variable ', variable)
-  }
-  if (!(variable %in% names(x))) {
-    stop('Variable ', variable, ' was not predicted. The predicted variables are: ',
-         paste(names(x), collapse = ', '), call. = F)
-  }
-
-  if (is.null(mode)) mode <- if (is.null(attr(x, 'map'))) 'curves' else 'map'
-
-  switch(mode,
-         'curves' = plot_curves(x, variable, main, ...),
-         'map' = plot_maps(x, variable, time, main, label = paste0(name, '$', variable), ...),
-         stop("'mode' must be the string 'curves' or the string 'map'", call. = F))
-
-  invisible(x)
+  structure(out,
+            class     = 'SpatFDpred',
+            newcoords = result$newcoords,
+            method    = method,
+            kriging   = kriging,
+            crossed   = result$crossed,
+            map       = map,
+            internal  = list(pred     = lapply(result$curves, `[[`, 'fd'),
+                             observed = lapply(stats::setNames(nm = variables), get_fd, sfd = object),
+                             coords   = get_coords(object)))
 }
 
 # .............................. FUNCIONES INTERNAS ................................................
-
-# GRILLA SOBRE UN MAPA: Cerca de n puntos en una grilla regular dentro del mapa
-map_grid <- function(map, n){
-  if (!requireNamespace('sf', quietly = TRUE)) {
-    stop("The 'sf' package is needed to predict over a map", call. = FALSE)
-  }
-  stopifnot("'n' must be a single positive number" = is.numeric(n) && length(n) == 1 && n > 0)
-
-  area <- sf::st_union(sf::st_geometry(map))
-  grid <- sf::st_coordinates(sf::st_sample(area, size = n, type = 'regular'))[, 1:2, drop = FALSE]
-  dimnames(grid) <- NULL
-  grid
-}
-
-# CURVAS PREDICHAS SOBRE LAS OBSERVADAS: En gris las curvas observadas
-# (suavizadas) y en color las predichas. Los parámetros gráficos de ... se
-# aplican a las curvas predichas.
-plot_curves <- function(x, variable, main = NULL, ...){
-  if (is.null(main)) main <- paste(variable, '- Predicted curves')
-  style <- utils::modifyList(list(col = 'darkblue', lty = 1), list(...))
-
-  plot(attr(x, 'fd')[[variable]], col = 'grey80', lty = 1, main = main)
-  do.call(lines, c(list(x[[variable]]$pred), style))
-}
-
-# MAPAS DE PREDICCIÓN Y VARIANZA, LADO A LADO: La predicción se muestra en un
-# tiempo dado, la varianza es la de toda la curva. De arriba hacia abajo:
-#
-#     +------------------- título -------------------+
-#     +------------ subtítulo con detalles ----------+
-#     |  barra de color     |    barra de color      |
-#     |  mapa               |    mapa                |
-#     |  Prediction         |    Variance            |
-#     +----------------------------------------------+
-#
-# Solo usa las curvas, la varianza y los atributos de la predicción, así que
-# no depende del método con que se haya predicho.
-plot_maps <- function(x, variable, time, main = NULL, label = variable, ...){
-  map <- attr(x, 'map')
-  if (is.null(map)) {
-    stop("mode = 'map' is only available for predictions made over a map", call. = FALSE)
-  }
-
-  curves <- x[[variable]]$pred
-  times  <- curves$basis$rangeval
-  if (is.null(time)) time <- times[1]
-  stopifnot(
-    "'time' must be a single value within the range of the curves" =
-      is.numeric(time) && length(time) == 1 && time >= times[1] && time <= times[2]
-  )
-
-  # Título: el que dé el usuario o el nombre de la predicción. Los detalles de
-  # cómo se obtuvo van siempre en el subtítulo.
-  if (is.null(main)) main <- label
-  details <- paste0('Time: ', format(time),
-                    ' - Method: ', attr(x, 'method'),
-                    ' - Crossed: ', if (isTRUE(attr(x, 'crossed'))) 'yes' else 'no')
-
-  grid     <- attr(x, 'newcoords')
-  stations <- attr(x, 'coords')[colnames(attr(x, 'fd')[[variable]]$coefs), , drop = FALSE]
-  colours  <- utils::modifyList(list(col = hcl.colors(100, 'viridis', rev = TRUE)), list(...))$col
-
-  # Los puntos forman una grilla regular: se pasan a una matriz para image()
-  cell <- function(v) {
-    values <- sort(unique(signif(v, 8)))
-    if (length(values) > 1) min(diff(values)) else 1
-  }
-  dx <- cell(grid[, 1])
-  dy <- cell(grid[, 2])
-  ix <- round((grid[, 1] - min(grid[, 1])) / dx) + 1
-  iy <- round((grid[, 2] - min(grid[, 2])) / dy) + 1
-
-  # Cada mapa ocupa dos paneles: su barra de color y, debajo, el mapa
-  draw <- function(values, what){
-    limits <- range(values)
-    if (diff(limits) == 0) limits <- limits + c(-0.5, 0.5)
-
-    # Barra de color en degradado, con la escala de valores
-    graphics::par(mar = c(2, 6, 0.5, 6))
-    image(x = seq(limits[1], limits[2], length.out = length(colours)), y = 1,
-          z = matrix(seq_along(colours), ncol = 1), col = colours,
-          axes = FALSE, xlab = '', ylab = '')
-    axis(1, cex.axis = 1.3, mgp = c(3, 0.6, 0), tcl = -0.3)
-    box()
-
-    # Mapa, con el contorno y los sitios observados
-    z <- matrix(NA_real_, max(ix), max(iy))
-    z[cbind(ix, iy)] <- values
-
-    graphics::par(mar = c(3, 1, 0.5, 1))
-    image(x = min(grid[, 1]) + dx * (seq_len(max(ix)) - 1),
-          y = min(grid[, 2]) + dy * (seq_len(max(iy)) - 1),
-          z = z, zlim = limits, col = colours, asp = 1,
-          axes = FALSE, xlab = '', ylab = '')
-    plot(sf::st_geometry(map), add = TRUE)
-    points(stations, pch = 21, bg = 'white', cex = 1.2)
-
-    mtext(what, side = 1, line = 1.2, cex = 1.3, font = 2)
-  }
-
-  old <- graphics::par(mar = c(0, 0, 0, 0))
-  on.exit({ layout(1); graphics::par(old) })
-
-  layout(matrix(c(1, 1,
-                  2, 4,
-                  3, 5), nrow = 3, byrow = TRUE), heights = c(2, 1.3, 10))
-
-  plot.new()
-  text(0.5, 0.68, main, cex = 2.4, font = 2)
-  text(0.5, 0.18, details, cex = 1.5)
-
-  draw(as.vector(fda::eval.fd(time, curves)), 'Prediction')
-  draw(x[[variable]]$var, 'Variance')
-}
 
 # MÉTODO SCORES: Kriging (o cokriging) de los scores y reconstrucción de las
 # curvas como media + combinación lineal de las funciones propias, todo sobre
 # los coeficientes de la base.
 #
 # Los dos métodos devuelven lo mismo, que es lo único que usa predict():
-#   curves    -> Lista por variable con las curvas (pred) y su varianza (var)
+#   curves    -> Lista por variable con las curvas como fd (fd) y evaluadas en
+#                los tiempos observados (pred), y su varianza (var)
 #   newcoords -> Coordenadas de los sitios nuevos, ya verificadas
 #   crossed   -> Si se usó algún variograma cruzado
-predict_scores <- function(object, newcoords, model, variable){
-  kriging <- krige_scores(object, newcoords, model, variable)
+predict_scores <- function(object, newcoords, model, variable, kriging = 'ordinary'){
+  kriging <- krige_scores(object, newcoords, model, variable, kriging)
   sites   <- rownames(kriging$newcoords)
 
   curves <- lapply(names(kriging$pcs), function(v) {
-    pca <- attr(object, 'pca')[[v]]
+    pca <- get_pca(object, v)
     pcs <- kriging$pcs[[v]]
 
     coefs <- pca$harmonics$coefs %*% t(kriging$pred[, pcs, drop = FALSE])
     coefs <- coefs + as.vector(pca$meanfd$coefs)
     colnames(coefs) <- sites
 
-    fdnames      <- attr(object, 'fd')[[v]]$fdnames
+    fdnames      <- get_fd(object, v)$fdnames
     fdnames[[2]] <- sites
 
-    list(pred = fda::fd(coefs, pca$harmonics$basis, fdnames),
+    fd <- fda::fd(coefs, pca$harmonics$basis, fdnames)
+
+    list(fd   = fd,
+         pred = evaluate_curves(fd, get_variable(object, v)$args$t),
          var  = rowSums(kriging$variance[, pcs, drop = FALSE]))
   })
   names(curves) <- names(kriging$pcs)
@@ -462,66 +267,142 @@ predict_scores <- function(object, newcoords, model, variable){
   list(curves = curves, newcoords = kriging$newcoords, crossed = kriging$crossed)
 }
 
-# MÉTODO LAMBDA: La curva predicha es una combinación lineal de las curvas
-# observadas, con un único juego de pesos por sitio nuevo. Los pesos salen de
-# la covarianza de las curvas completas, que es la suma de las covarianzas de
-# los scores. Por ahora solo para una variable y sin variogramas cruzados.
-predict_lambda <- function(object, newcoords, model, variable){
-  setup <- prediction_setup(object, newcoords, model, variable)
+# MÉTODO LAMBDA (COKRIGING FUNCIONAL): La curva predicha de cada variable es
+# su media más una combinación lineal de las curvas observadas, ya centradas,
+# de todas las variables. Hay un peso por sitio observado y variable, igual
+# para todos los tiempos.
+#
+# El sistema tiene un bloque por pareja de variables (p, q), con la covarianza
+# entre sus curvas
+#
+#     Omega_pq(h) = suma_k suma_l  G_pq[k, l] * C_{pk, ql}(h)
+#
+# donde C_{pk, ql} es la covarianza entre los scores pk y ql, y G_pq el producto
+# interno entre las funciones propias de las dos variables sobre el intervalo
+# común de tiempo. Dentro de una variable observada en todo ese intervalo,
+# G_pp es la identidad: solo cuenta la covarianza de cada score consigo mismo.
+#
+# Con kriging ordinario los pesos de la variable que se predice suman 1 y los de
+# cada una de las demás suman 0. Entonces las medias se cancelan y la
+# predicción es la misma con las curvas centradas o sin centrar.
+predict_lambda <- function(object, newcoords, model, variable, kriging = 'ordinary'){
+  setup     <- prediction_setup(object, newcoords, model, variable)
+  variables <- names(setup$pcs)
+  ids       <- unlist(setup$pcs, use.names = FALSE)
+  ordinary  <- kriging == 'ordinary'
+  covs      <- score_covariances(setup$compiled, ids, ordinary)
+  newcoords <- setup$newcoords
 
-  crossed <- !all(setup$compiled$table$var %in% names(score_ids(object)))
-  if (length(setup$pcs) > 1 || crossed) {
-    stop("The method 'lambda' only predicts one variable with a model without cross-variograms. ",
-         if (crossed) paste0("The model '", setup$model, "' has cross-variograms")
-         else paste0("Choose one variable with 'variable': ", paste(names(setup$pcs), collapse = ', ')),
-         '\nThe models of the object are:\n', setup$summary_table(), call. = FALSE)
+  # ========================== INTERVALO COMÚN =================================
+  # Las curvas de varias variables solo se pueden combinar en los tiempos que
+  # comparten. Con una sola variable es su propio intervalo.
+  ranges <- vapply(variables, function(v) get_fd(object, v)$basis$rangeval, numeric(2))
+  domain <- c(max(ranges[1, ]), min(ranges[2, ]))
+  own    <- ranges[1, ] == domain[1] & ranges[2, ] == domain[2]    # Variables observadas en todo el intervalo
+
+  if (domain[1] >= domain[2]) {
+    stop("The variables have no time in common, so the method 'lambda' cannot combine them. ",
+         "The 't' given to spatfd() must be on a common scale", call. = FALSE)
+  }
+  if (!all(own)) {
+    message("Method 'lambda': the curves are predicted over the common time interval [",
+            format(domain[1]), ", ", format(domain[2]), "]")
   }
 
-  v      <- names(setup$pcs)
-  ids    <- setup$pcs[[v]]
-  places <- setup$sites[[1]]              # Los scores de una variable comparten sitios
-  covs   <- score_covariances(setup$compiled, ids)
+  # ===================== COVARIANZA ENTRE CURVAS ==============================
+  inner <- function(p, q) {
+    if (p == q && own[[p]]) return(diag(length(setup$pcs[[p]])))   # Funciones propias ortonormales
+    inner_product(get_pca(object, p)$harmonics, get_pca(object, q)$harmonics, domain)
+  }
 
-  # Covarianza de cada score entre sitios observados (Omega) y con los sitios
-  # nuevos (C0). Las de las curvas completas son la suma sobre los scores.
-  d  <- cross_dist(places, places)
-  d0 <- cross_dist(places, setup$newcoords)
+  curve_covariance <- function(p, q) {
+    G     <- inner(p, q)
+    terms <- list()
+    for (k in seq_along(setup$pcs[[p]])) {
+      for (l in seq_along(setup$pcs[[q]])) {
+        covariance <- covs[[setup$pcs[[p]][k], setup$pcs[[q]][l]]]
+        if (!is.null(covariance) && G[k, l] != 0) terms <- c(terms, list(list(G = G[k, l], C = covariance)))
+      }
+    }
+    if (length(terms) == 0) return(NULL)                # Variables sin covarianza cruzada
+    function(h) Reduce(`+`, lapply(terms, function(term) term$G * term$C(h)))
+  }
 
-  evaluate <- function(covariance, d) matrix(covariance(d), nrow(d), ncol(d))
-  Omega <- lapply(ids, function(id) evaluate(covs[[id, id]], d))
-  C0    <- lapply(ids, function(id) evaluate(covs[[id, id]], d0))
+  P     <- length(variables)
+  omega <- matrix(vector('list', P * P), P, P, dimnames = list(variables, variables))
+  for (p in variables) for (q in variables) omega[p, q] <- list(curve_covariance(p, q))
 
-  R <- tryCatch(chol(Reduce(`+`, Omega)), error = function(e) {
-    stop('The covariance matrix of the curves is not positive definite. ',
-         'Check for duplicated sites or for an invalid model', call. = FALSE)
+  # ¿Se usó alguna covarianza cruzada entre variables?
+  crossed <- !all(vapply(omega[row(omega) != col(omega)], is.null, logical(1)))
+
+  # ============================ SISTEMA =======================================
+  # Los scores de una variable comparten sitios: los de su primer score
+  places <- lapply(variables, function(v) setup$sites[[match(setup$pcs[[v]][1], ids)]])
+  names(places) <- variables
+  rows <- split(seq_len(sum(vapply(places, nrow, integer(1)))),
+                rep(variables, vapply(places, nrow, integer(1))))[variables]
+
+  evaluate <- function(covariance, a, b) {
+    d <- cross_dist(a, b)
+    if (is.null(covariance)) return(matrix(0, nrow(d), ncol(d)))
+    matrix(covariance(d), nrow(d), ncol(d))
+  }
+
+  Sigma <- matrix(0, length(unlist(rows)), length(unlist(rows)))
+  for (p in variables) {
+    for (q in variables) Sigma[rows[[p]], rows[[q]]] <- evaluate(omega[[p, q]], places[[p]], places[[q]])
+  }
+  if (!ordinary) {
+    R <- tryCatch(chol(Sigma), error = function(e) {
+      stop('The covariance matrix of the curves is not positive definite. ',
+           'Check for duplicated sites or for an invalid model', call. = FALSE)
+    })
+  }
+
+  # ============================ CURVAS ========================================
+  # Curvas observadas centradas, evaluadas en los tiempos dados
+  centred <- function(p, t) {
+    observed <- fda::eval.fd(t, get_fd(object, p))
+    colnames(observed) <- colnames(get_fd(object, p)$coefs)
+    observed[, rownames(places[[p]]), drop = FALSE] - as.vector(fda::eval.fd(t, get_pca(object, p)$meanfd))
+  }
+
+  curves <- lapply(variables, function(r) {
+    args <- get_variable(object, r)$args
+    t    <- args$t[args$t >= domain[1] & args$t <= domain[2]]
+
+    # Pesos de todos los sitios observados para cada sitio nuevo
+    C0   <- do.call(rbind, lapply(variables, function(p) evaluate(omega[[p, r]], places[[p]], newcoords)))
+    sill <- omega[[r, r]](0)
+
+    if (ordinary) {
+      # Una restricción por variable: los pesos de r suman 1, los de las demás 0
+      targets  <- lapply(variables, function(p) if (p == r) seq_len(nrow(newcoords)) else integer(0))
+      solved   <- constrained_solve(Sigma, C0, rows, targets, sill)
+      weights  <- solved$weights
+      variance <- solved$variance
+    } else {
+      weights  <- backsolve(R, backsolve(R, C0, transpose = TRUE))
+      variance <- sill - colSums(C0 * weights)
+    }
+    names(variance) <- rownames(newcoords)
+
+    pred <- as.vector(fda::eval.fd(t, get_pca(object, r)$meanfd)) +
+      Reduce(`+`, lapply(variables, function(p) centred(p, t) %*% weights[rows[[p]], , drop = FALSE]))
+    dimnames(pred) <- list(t, rownames(newcoords))
+
+    # Versión funcional, solo para graficar: en la base de la variable si se
+    # predijo en todo su intervalo, en B-splines sobre el intervalo común si no
+    basis <- if (own[[r]]) get_fd(object, r)$basis else fda::create.bspline.basis(domain, args$nbasis)
+    fd    <- fda::smooth.basis(t, pred, basis)$fd
+    fd$fdnames[[2]]  <- rownames(newcoords)
+    colnames(fd$coefs) <- rownames(newcoords)
+
+    list(fd = fd, pred = pred, var = variance)
   })
-  weights <- backsolve(R, backsolve(R, Reduce(`+`, C0), transpose = TRUE))   # Sitios x sitios nuevos
+  names(curves) <- variables
 
-  # VARIANZA: Suma sobre los scores de  Var(f_k) - 2 c_k' lambda + lambda' Omega_k lambda.
-  # Como en la versión CRAN, Var(f_k) es el valor propio del componente y no
-  # la meseta del modelo ajustado, por lo que puede salir negativa.
-  eigenvalues <- attr(object, 'pca')[[v]]$values[seq_along(ids)]
-  variance <- Reduce(`+`, lapply(seq_along(ids), function(k) {
-    eigenvalues[k] - 2 * colSums(C0[[k]] * weights) + colSums(weights * (Omega[[k]] %*% weights))
-  }))
-  names(variance) <- rownames(setup$newcoords)
-
-  # CURVAS: Como en la versión CRAN, los pesos se aplican a las curvas
-  # observadas sin centrar. Los pesos son de kriging simple y no suman uno, así
-  # que una implementación más cuidadosa los aplicaría a las curvas centradas y
-  # sumaría la media al final; basta con cambiar las dos líneas marcadas.
-  observed <- attr(object, 'fd')[[v]]
-  coefs    <- observed$coefs[, rownames(places), drop = FALSE]    # <- restar aquí la media
-  coefs    <- coefs %*% weights                                   # <- sumar aquí la media
-  colnames(coefs) <- rownames(setup$newcoords)
-
-  fdnames      <- observed$fdnames
-  fdnames[[2]] <- rownames(setup$newcoords)
-
-  curves <- list(list(pred = fda::fd(coefs, observed$basis, fdnames), var = variance))
-  names(curves) <- v
-
-  list(curves = curves, newcoords = setup$newcoords, crossed = FALSE)
+  list(curves = curves, newcoords = newcoords, crossed = crossed)
 }
 
 # PREPARACIÓN COMÚN A LOS DOS MÉTODOS: Verifica los argumentos y deja listo lo
@@ -530,29 +411,28 @@ predict_lambda <- function(object, newcoords, model, variable){
 #   pcs             -> Lista con los scores que pertenecen a cada variable
 #   sites, values   -> Sitios y valores observados de cada score
 #   newcoords       -> Coordenadas de los sitios nuevos, ya verificadas
-#   summary_table   -> Función que devuelve la tabla de modelos, para los errores
 prediction_setup <- function(object, newcoords, model = NULL, variable = NULL){
 
   # ============================ MODELO A USAR =================================
   # Los modelos ya están compilados dentro del objeto, ver add_model(). En
   # caso de error se muestra la tabla resumen de los modelos registrados.
-  available     <- ls(attr(object, 'models'))
-  summary_table <- function() paste(capture.output(print(object$models)), collapse = '\n')
+  available <- names(get_models(object))
 
   if (length(available) == 0) {
     stop('The object has no models. Register one with add_model()', call. = FALSE)
   }
   if (is.null(model)) {
     if (length(available) > 1) {
-      stop("The object has several models, choose one with 'model':\n", summary_table(), call. = FALSE)
+      stop("The object has several models, choose one with 'model':\n", models_message(object),
+           call. = FALSE)
     }
     model <- available
   }
   if (!is.character(model) || length(model) != 1 || !(model %in% available)) {
-    stop("'model' must be the name of one of the models of the object:\n", summary_table(),
+    stop("'model' must be the name of one of the models of the object:\n", models_message(object),
          call. = FALSE)
   }
-  compiled <- attr(object, 'models')[[model]]
+  compiled <- get_models(object)[[model]]
 
   # Scores del objeto (un campo = un score) y variable a la que pertenecen
   all_ids <- score_ids(object)
@@ -561,7 +441,7 @@ prediction_setup <- function(object, newcoords, model = NULL, variable = NULL){
     variable <- unique(all_ids[intersect(names(all_ids), names(compiled$variograms))])
   }
 
-  coords <- attr(object, 'data')$coords
+  coords <- get_coords(object)
 
   stopifnot(
     'Variables not found in object' = all(variable %in% var_names(object)),
@@ -593,7 +473,7 @@ prediction_setup <- function(object, newcoords, model = NULL, variable = NULL){
   if (length(missing_models) > 0) {
     stop("The model '", model, "' has no variogram for the scores: ",
          paste(missing_models, collapse = ', '),
-         '\nThe models of the object are:\n', summary_table(), call. = FALSE)
+         '\nThe models of the object are:\n', models_message(object), call. = FALSE)
   }
 
   # Sitios con score faltante se descartan campo a campo: las variables pueden
@@ -604,23 +484,25 @@ prediction_setup <- function(object, newcoords, model = NULL, variable = NULL){
   values   <- Map(function(id, obs) scores[obs, id], ids, observed)
 
   list(model = model, compiled = compiled, pcs = pcs, sites = sites, values = values,
-       newcoords = newcoords, summary_table = summary_table)
+       newcoords = newcoords)
 }
 
-# KRIGING DE LOS SCORES: Predice por kriging simple los scores de las variables
-# pedidas en los sitios nuevos. Es el paso común a todo lo que necesite los
-# scores predichos (método scores, validación cruzada, ...) y devuelve:
+# KRIGING DE LOS SCORES: Predice por kriging ordinario o simple los scores de
+# las variables pedidas en los sitios nuevos. Es el paso común a todo lo que
+# necesite los scores predichos (método scores, validación cruzada, ...) y
+# devuelve:
 #   pred      -> Matriz de scores predichos (sitios nuevos x scores)
 #   variance  -> Matriz con la varianza de predicción de cada score
 #   pcs       -> Lista con los scores que pertenecen a cada variable
 #   newcoords -> Coordenadas de los sitios nuevos, ya verificadas
 #   crossed   -> Si se usó algún variograma cruzado entre los scores predichos
-krige_scores <- function(object, newcoords, model = NULL, variable = NULL){
-  setup <- prediction_setup(object, newcoords, model, variable)
-  ids   <- unlist(setup$pcs, use.names = FALSE)
+krige_scores <- function(object, newcoords, model = NULL, variable = NULL, kriging = 'ordinary'){
+  setup    <- prediction_setup(object, newcoords, model, variable)
+  ids      <- unlist(setup$pcs, use.names = FALSE)
+  ordinary <- kriging == 'ordinary'
 
-  covs    <- score_covariances(setup$compiled, ids)
-  kriging <- simple_kriging(setup$sites, setup$values, covs, setup$newcoords)
+  covs    <- score_covariances(setup$compiled, ids, ordinary)
+  kriging <- solve_kriging(setup$sites, setup$values, covs, setup$newcoords, ordinary)
   dimnames(kriging$pred) <- dimnames(kriging$variance) <- list(rownames(setup$newcoords), ids)
 
   # ¿Se usó algún variograma cruzado entre los scores predichos?
@@ -628,172 +510,4 @@ krige_scores <- function(object, newcoords, model = NULL, variable = NULL){
 
   list(pred = kriging$pred, variance = kriging$variance, pcs = setup$pcs,
        newcoords = setup$newcoords, crossed = crossed)
-}
-
-# COVARIANZAS DE LOS SCORES: A partir de un modelo ya compilado, ver
-# add_model(), se construye una matriz-lista con la función de covarianza
-# de cada pareja de campos, C(h) = meseta - gamma(h). Las parejas sin
-# variograma cruzado quedan en NULL, es decir, se toman como independientes.
-score_covariances <- function(compiled, ids){
-  unbounded <- c('linear', 'power', 'logarithmic', 'spline', 'legendre')
-
-  q    <- length(ids)
-  covs <- matrix(vector('list', q * q), q, q, dimnames = list(ids, ids))
-
-  for (i in seq_len(q)) {
-    for (j in i:q) {
-      # El id de un variograma cruzado puede venir en cualquiera de los dos órdenes
-      key <- if (i == j) ids[i] else paste(ids[c(i, j)], ids[c(j, i)], sep = '.')
-      key <- intersect(key, names(compiled$variograms))
-      if (length(key) == 0) next
-
-      structures <- compiled$table$model[compiled$table$var == key[1]]
-      if (any(structures %in% unbounded)) {
-        stop("The model of '", key[1], "' has no sill (",
-             paste(intersect(structures, unbounded), collapse = ', '),
-             '), so it cannot be used for simple kriging', call. = FALSE)
-      }
-      if (is.na(compiled$sills[[key[1]]])) {
-        stop("The model of '", key[1], "' has missing values in 'sigma'", call. = FALSE)
-      }
-
-      covs[[i, j]] <- covs[[j, i]] <- local({
-        sill  <- compiled$sills[[key[1]]]
-        gamma <- compiled$variograms[[key[1]]]
-        function(h) sill - gamma(h)
-      })
-    }
-  }
-  covs
-}
-
-# DISTANCIAS ENTRE DOS CONJUNTOS DE SITIOS: Se calcula coordenada a coordenada
-# para que la distancia entre dos sitios iguales sea exactamente cero (el
-# efecto pepita depende de ello).
-cross_dist <- function(a, b){
-  d2 <- matrix(0, nrow(a), nrow(b))
-  for (k in seq_len(ncol(a))) {
-    d2 <- d2 + outer(a[, k], b[, k], '-')^2
-  }
-  sqrt(d2)
-}
-
-# SOLVER DE KRIGING SIMPLE (media conocida e igual a cero):
-#   sites     -> Lista con las coordenadas de los sitios de cada campo
-#   values    -> Lista con los valores observados de cada campo
-#   covs      -> Matriz-lista de funciones de covarianza, ver score_covariances()
-#   newcoords -> Coordenadas de los sitios de predicción
-#
-# Sigma se arma por bloques, uno por pareja de campos. Sin covarianzas cruzadas
-# es diagonal por bloques y el sistema equivale a un kriging por campo; con
-# ellas es el sistema de cokriging. Los casos univariado y multivariado son
-# entonces el mismo sistema.
-#
-# Los campos que no están conectados por ninguna covarianza cruzada no
-# comparten información, así que cada grupo de campos conectados se resuelve
-# por aparte: da lo mismo que resolver el sistema completo y evita factorizar
-# una matriz llena de ceros.
-simple_kriging <- function(sites, values, covs, newcoords){
-  q <- length(sites)
-  m <- nrow(newcoords)
-
-  # Los modelos no siempre conservan las dimensiones de la matriz de distancias.
-  # Si las distancias son entre un conjunto de sitios y él mismo la matriz es
-  # simétrica y basta evaluar la mitad.
-  evaluate <- function(covariance, d, symmetric = FALSE){
-    if (!symmetric) return(matrix(covariance(d), nrow(d), ncol(d)))
-
-    half <- lower.tri(d, diag = TRUE)
-    out  <- matrix(0, nrow(d), ncol(d))
-    out[half] <- covariance(d[half])
-    out[upper.tri(out)] <- t(out)[upper.tri(out)]
-    out
-  }
-
-  # DISTANCIAS: Los scores de una misma variable comparten sitios, así que cada
-  # matriz de distancias se calcula una sola vez por conjunto distinto de sitios
-  places <- list()
-  place  <- integer(q)                   # Conjunto de sitios de cada campo
-  for (i in seq_len(q)) {
-    known <- Position(function(p) identical(p, sites[[i]]), places)
-    if (is.na(known)) {
-      places <- c(places, list(sites[[i]]))
-      known  <- length(places)
-    }
-    place[i] <- known
-  }
-
-  computed <- list()
-  distance <- function(a, b){            # b = 0 son los sitios de predicción
-    key <- paste(a, b)
-    if (is.null(computed[[key]])) {
-      computed[[key]] <<- cross_dist(places[[a]], if (b == 0) newcoords else places[[b]])
-    }
-    computed[[key]]
-  }
-
-  # GRUPOS: Campos conectados, directa o indirectamente, por covarianzas cruzadas
-  group <- seq_len(q)
-  for (i in seq_len(q)) {
-    for (j in seq_len(q)) {
-      if (!is.null(covs[[i, j]])) group[group == group[j]] <- group[i]
-    }
-  }
-
-  pred <- variance <- matrix(0, m, q)
-
-  for (g in unique(group)) {
-    fields <- which(group == g)
-    k <- length(fields)
-    n <- vapply(sites[fields], nrow, integer(1))
-
-    rows <- split(seq_len(sum(n)), rep(seq_len(k), n))         # Filas de cada campo
-    cols <- split(seq_len(m * k), rep(seq_len(k), each = m))   # Columnas de cada campo objetivo
-
-    Sigma <- matrix(0, sum(n), sum(n))    # Covarianza entre observaciones
-    C0    <- matrix(0, sum(n), m * k)     # Covarianza entre observaciones y sitios nuevos
-
-    for (a in seq_len(k)) {
-      for (b in a:k) {
-        i <- fields[a]
-        j <- fields[b]
-        if (is.null(covs[[i, j]])) next
-        same_sites <- place[i] == place[j]
-
-        # Sigma es simétrica: solo se evalúa un bloque de cada pareja de campos
-        block <- evaluate(covs[[i, j]], distance(place[i], place[j]), symmetric = same_sites)
-        Sigma[rows[[a]], rows[[b]]] <- block
-        if (a < b) Sigma[rows[[b]], rows[[a]]] <- t(block)
-
-        # La covarianza con los sitios nuevos solo depende de los sitios del
-        # campo observado: si ambos campos comparten sitios, es la misma
-        block <- evaluate(covs[[i, j]], distance(place[i], 0))
-        C0[rows[[a]], cols[[b]]] <- block
-        if (a < b) {
-          C0[rows[[b]], cols[[a]]] <- if (same_sites) block else evaluate(covs[[i, j]], distance(place[j], 0))
-        }
-      }
-    }
-
-    # Una sola factorización sirve para todos los sitios y campos del grupo.
-    # Cholesky falla si Sigma no es definida positiva, lo que delata un modelo
-    # inválido.
-    R <- tryCatch(chol(Sigma), error = function(e) {
-      stop('The covariance matrix of the scores is not positive definite. ',
-           'Check for duplicated sites or for an invalid model', call. = FALSE)
-    })
-    #
-    # Con Sigma = R'R y V = R'^-1 C0 no hace falta calcular los pesos Sigma^-1 C0:
-    #   predicción = C0' Sigma^-1 z  = V' (R'^-1 z)
-    #   varianza   = C(0) - C0' Sigma^-1 C0 = C(0) - suma por columnas de V^2
-    V <- backsolve(R, C0, transpose = TRUE)
-    z <- backsolve(R, unlist(values[fields]), transpose = TRUE)
-
-    sills <- vapply(fields, function(j) covs[[j, j]](0), numeric(1))
-
-    pred[, fields]     <- matrix(crossprod(V, z), m, k)
-    variance[, fields] <- matrix(rep(sills, each = m) - colSums(V^2), m, k)
-  }
-
-  list(pred = pred, variance = variance)
 }

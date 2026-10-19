@@ -1,0 +1,661 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{hyperref}
+
+% \code{} admite guiones bajos y signos de pesos sin escaparlos
+\DeclareRobustCommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\emergencystretch=2em
+
+\title{SpatFD v2: estructura del paquete\\[0.3em]\large Guía para desarrolladores}
+\author{Documento de desarrollo}
+\date{Octubre de 2026}
+
+\begin{document}
+\sloppy
+\maketitle
+
+\noindent
+Este documento describe cómo está construido SpatFD v2 por dentro: qué hay en
+cada archivo, cómo es el objeto \code{SpatFD}, por dónde pasa una predicción y
+qué hay que tocar para extender el paquete. Está pensado para quien vaya a
+mantenerlo. La teoría de cada método está en la documentación de las funciones
+(sección \emph{Theory}) y el diseño del \emph{solver} en
+\code{dev/diseno_solver.pdf}; aquí solo se repite lo necesario para entender el
+código.
+
+\tableofcontents
+
+% ======================================================================
+\section{Principios de diseño}
+
+El paquete sigue la convención de los paquetes de modelado de R (\code{lm},
+\code{predict}, \code{update}). Cinco reglas explican casi todas las decisiones
+del código:
+
+\begin{enumerate}
+  \item \textbf{Los objetos son listas normales con clase.} No hay
+        \emph{environments} ni métodos \code{$} sobrescritos. R no copia los
+        datos al copiar una lista mientras no se modifiquen, así que compartir
+        referencias no ahorra memoria de forma apreciable.
+  \item \textbf{Nada se modifica en el sitio.} Toda función que cambia un
+        objeto lo devuelve: \code{sfd <- add_model(sfd, ...)}.
+  \item \textbf{Lo funcional está oculto.} El usuario solo ve matrices y
+        tablas. Las curvas suavizadas, los componentes principales, los datos
+        originales y los modelos compilados viven en un único atributo,
+        \code{internal}, al que el resto del código accede solo por medio de
+        accesores (sección~\ref{sec:accesores}).
+  \item \textbf{El ajuste de variogramas está fuera del paquete.} SpatFD
+        exporta los \emph{scores} (\code{togstat()}), recibe los modelos
+        ajustados (\code{toSpatFD()}, \code{add_model()}) y resuelve la
+        predicción con código propio.
+  \item \textbf{Mensajes al usuario en inglés, comentarios en español.} Los
+        mensajes de error y la documentación roxygen están en inglés; los
+        comentarios del código, en español, con un título en mayúsculas al inicio
+        de cada bloque (por ejemplo, 	exttt{COMPILACIÓN:}).
+\end{enumerate}
+
+% ======================================================================
+\section{Flujo de trabajo}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{lll L}
+\toprule
+Paso & Función & Archivo & Resultado \\
+\midrule
+1 & \code{spatfd()} & \code{spatfd.R} & Objeto con una variable: suavizamiento + PCA funcional \\
+2 & \code{+} & \code{spatfd.R} & Objeto con varias variables \\
+3 & \code{togstat()} & \code{gstat.R} & Objeto \code{gstat} con un campo por \emph{score} \\
+4 & (fuera del paquete) & --- & Variogramas ajustados con \code{gstat} \\
+5 & \code{add_model()} & \code{add_model.R} & El objeto con el modelo compilado y registrado \\
+6 & \code{predict()} & \code{predict.R} & Objeto \code{SpatFDpred}: curvas y varianzas \\
+7 & \code{plot()}, \code{print()} & \code{methods-*.R} & Gráficos y resúmenes \\
+8 & \code{leave_one_out()} & \code{leave_one_out.R} & Objeto \code{SpatFDloo}: comparación de modelos y métodos \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ======================================================================
+\section{Organización de los archivos}
+
+Cada archivo agrupa una función exportada (o una familia) con sus funciones
+internas. Las funciones internas que usan varios archivos están en
+\code{utils.R}. La tabla lista todo lo que hay en \code{R/}.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{l L L}
+\toprule
+Archivo & Exportado & Interno \\
+\midrule
+\code{SpatFD-package.R} & Documentación del paquete & Todos los \code{@importFrom} \\
+\code{spatfd.R} & \code{spatfd()}, \code{+.SpatFD} & --- \\
+\code{methods-SpatFD.R} & \code{print}, \code{summary}, \code{plot} de \code{SpatFD}; \code{var_names()} & \code{print.summary.SpatFD}, \code{plot_components()} \\
+\code{gstat.R} & \code{togstat()}, \code{toSpatFD()} y sus métodos & --- \\
+\code{add_model.R} & \code{add_model()} & \code{compile_model()} \\
+\code{models.R} & \code{models}, \code{availablemodels()} & \code{check_params()} \\
+\code{predict.R} & \code{predict.SpatFD} & \code{predict_scores()}, \code{predict_lambda()}, \code{prediction_setup()}, \code{krige_scores()} \\
+\code{kriging.R} & --- & \code{score_covariances()}, \code{cross_dist()}, \code{solve_kriging()}, \code{constrained_solve()} \\
+\code{methods-SpatFDpred.R} & \code{print}, \code{plot} de \code{SpatFDpred} & \code{predicted_fd()}, \code{observed_fd()}, \code{map_grid()}, \code{plot_curves()}, \code{plot_maps()} \\
+\code{leave_one_out.R} & \code{leave_one_out()}, \code{print.SpatFDloo} & \code{curve_distance()}, \code{refit()} \\
+\code{utils.R} & --- & Constructor, accesores, \code{score_ids()}, \code{model_table()}, \code{models_message()}, \code{evaluate_curves()}, \code{inner_product()} \\
+\code{data.R} & Documentación de \code{air_mexico}, \code{air_bogota}, \code{vowels} & --- \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Otras carpetas:
+\begin{itemize}
+  \item \code{tests/testthat/}: una prueba por archivo de \code{R/}
+        (sección~\ref{sec:pruebas}).
+  \item \code{dev/}: scripts de uso (\code{01_uso_paquete.R}) y de comparación
+        con \code{gstat} (\code{02_comparacion_gstat.R}), y documentos técnicos.
+        Está en \code{.Rbuildignore}.
+  \item \code{archive/}: versiones anteriores y material de referencia. Está en
+        \code{.gitignore}.
+  \item \code{man/} y \code{NAMESPACE}: generados por roxygen. No se editan a
+        mano; se regeneran con \code{devtools::document()}.
+\end{itemize}
+
+% ======================================================================
+\section{El objeto \code{SpatFD}}
+\label{sec:objeto}
+
+\subsection{Estructura}
+
+\begin{footnotesize}
+\begin{verbatim}
+sfd                                   lista, clase "SpatFD"
+|-- $scores     matriz: un sitio por fila; coordenadas y luego <var>.PC1, <var>.PC2, ...
+|-- $variance   data.frame: una fila por variable (basis, no. PC, variance)
+|-- $models     data.frame: una fila por modelo registrado (tabla resumen)
+`-- attr(, "internal")                lista
+    |-- $coords     matriz con las coordenadas de todos los sitios
+    |-- $variables  lista, una entrada por variable:
+    |   `-- $PM10
+    |       |-- $data   matriz original (tiempos x sitios)
+    |       |-- $fd     curvas suavizadas (objeto fd de fda)
+    |       |-- $pca    resultado de fda::pca.fd()
+    |       `-- $args   list(t, basis, nbasis, lambda): para repetir el análisis
+    `-- $models     lista, una entrada por modelo registrado:
+        `-- $lmc
+            |-- $table       data.frame del modelo (var, model, rango, sigma, alpha1)
+            |-- $variograms  lista de funciones gamma(h), una por id de variograma
+            `-- $sills       vector con la meseta total de cada id
+\end{verbatim}
+\end{footnotesize}
+
+\subsection{Invariantes}
+
+Todo el código supone que se cumple lo siguiente. Cualquier función que cree o
+modifique un objeto debe mantenerlo.
+
+\begin{itemize}
+  \item Las filas de \code{$scores} son todos los sitios del objeto, ordenados
+        por nombre. Un sitio donde no se observó una variable tiene \code{NA}
+        en sus \emph{scores}.
+  \item Las columnas de \code{$scores} son primero las coordenadas (las de
+        \code{internal$coords}) y luego los \emph{scores}, con nombres
+        \code{<variable>.PC<k>}. El orden de las columnas importa: es el que
+        recibe \code{gstat} (sección~\ref{sec:gstat}).
+  \item Los \emph{ids} de los variogramas son los nombres de los
+        \emph{scores} (\code{PM10.PC1}) para los directos, y dos de ellos
+        unidos por un punto (\code{NO2.PC1.PM10.PC1}) para los cruzados, en
+        cualquier orden.
+  \item \code{$models} es siempre \code{model_table()} del objeto. Solo
+        \code{new_spatfd()} y \code{set_models()} la escriben.
+  \item \code{var_names()} devuelve las variables en orden alfabético. Las
+        funciones que recorren variables usan ese orden.
+\end{itemize}
+
+\subsection{Constructor, accesores y modificadores}
+\label{sec:accesores}
+
+Están en \code{utils.R}. El resto del paquete \textbf{nunca} usa
+\code{attr(x, "internal")} directamente; así, si la estructura interna
+cambia, solo cambia este archivo.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{l L}
+\toprule
+Función & Qué hace \\
+\midrule
+\code{new_spatfd(scores, variance, coords, variables, models)} & Arma el objeto y calcula \code{$models} \\
+\code{get_coords(sfd)} & Coordenadas de todos los sitios \\
+\code{get_variable(sfd, v)} & Entrada completa de la variable: \code{data}, \code{fd}, \code{pca}, \code{args} \\
+\code{get_fd(sfd, v)}, \code{get_pca(sfd, v)} & Curvas suavizadas y PCA de la variable \\
+\code{get_models(sfd)} & Lista de modelos compilados \\
+\code{set_pca(sfd, v, pca)} & Devuelve el objeto con el PCA de \code{v} reemplazado \\
+\code{set_models(sfd, models)} & Devuelve el objeto con los modelos reemplazados y \code{$models} recalculada \\
+\code{score_ids(sfd)} & Vector con la variable de cada \emph{score}, nombrado con el id del \emph{score} \\
+\code{model_table(sfd)} & La tabla resumen de los modelos \\
+\code{models_message(sfd)} & La tabla resumen como texto, para los mensajes de error \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Construcción: \code{spatfd()}}
+
+\begin{enumerate}
+  \item Verifica los argumentos con \code{stopifnot()} y mensajes con nombre.
+  \item Suaviza: base B-splines o Fourier sobre \code{range(t)}, penalización
+        \code{vec2Lfd()} y \code{smooth.basis()}.
+  \item Calcula el PCA con \code{pca.fd(fd, nharm)}. Si se da \code{var},
+        repite el PCA con el mínimo número de componentes que alcanza esa
+        varianza.
+  \item Arma \code{scores}, \code{variance} y la entrada de la variable en
+        \code{variables}, con \code{args} para poder repetir el análisis, y
+        llama a \code{new_spatfd()}.
+\end{enumerate}
+
+\subsection{Combinación: \code{+.SpatFD}}
+
+\begin{itemize}
+  \item Exige que las coordenadas tengan las mismas columnas.
+  \item Si una variable está en los dos objetos, conserva la del primero y
+        avisa con un \emph{warning}.
+  \item Coordenadas: unión de los sitios, primero los del primer objeto.
+  \item \emph{Scores}: unión completa por sitio (\emph{full join}) con
+        \code{match()}. No se indexan filas de un \emph{data frame} por nombre,
+        porque R hace coincidencias parciales: el sitio \code{s1} tomaría los
+        \emph{scores} de \code{s10}. Hay una prueba para este caso.
+  \item \code{variables}: concatenación de las listas.
+  \item Modelos: los del primer objeto y luego los del segundo. Un nombre
+        repetido se renombra en secuencia (\code{model 2}, \dots) con un
+        mensaje.
+\end{itemize}
+
+% ======================================================================
+\section{Intercambio con \code{gstat}}
+\label{sec:gstat}
+
+\subsection{\code{togstat()}}
+
+Crea un objeto \code{gstat} con un campo por \emph{score} (fórmula
+\code{score ~ 1}) y quita en cada campo los sitios sin observación. Los campos
+siguen el orden de las columnas de \code{$scores}. \textbf{Ese orden no es
+indiferente}: \code{gstat::fit.lmc()} llega a ajustes distintos según el orden
+de los campos. Hubo una regresión por ordenar alfabéticamente, y hay una prueba
+en \code{test-spatfd.R} que lo impide.
+
+\subsection{\code{toSpatFD()}: el esquema tabular}
+
+Todo modelo, venga de donde venga, se convierte a un \emph{data frame} con una
+fila por estructura y las columnas:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Columna & Contenido \\
+\midrule
+\code{var} & id del variograma (directo o cruzado) \\
+\code{model} & nombre del modelo en la lista \code{models} \\
+\code{rango} & parámetro de rango \\
+\code{sigma} & meseta parcial (puede ser negativa en los cruzados) \\
+\code{alpha1} & parámetro de forma (\code{kappa} en \code{gstat}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\code{toSpatFD()} es genérica. Métodos actuales: \code{gstat} (resultado de
+\code{fit.lmc()}), \code{list} (lista nombrada de \code{variogramModel}, que se
+envuelve como un \code{gstat}) y \code{default} (error). La traducción de
+nombres de \code{gstat} está en \code{toSpatFD.gstat()}. La anisotropía se
+descarta.
+
+% ======================================================================
+\section{Modelos de variograma}
+
+\subsection{La lista \code{models}}
+
+\code{models} (exportada) es una lista nombrada de funciones
+\code{function(h, rango, sigma, alpha1, ...)} que devuelven $\gamma(h)$. Hay 18
+espejos de \code{gstat}, que reproducen sus valores (prueba en
+\code{test-models.R}), y 4 modelos propios. Todas validan sus parámetros con
+\code{check_params()}, que define los dominios:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Dominio & Usado en \\
+\midrule
+\code{'positive'} (por defecto) & \code{rango} y \code{alpha1} de casi todos \\
+\code{'non-negative'} & \code{rango} de \code{linear} (0 = sin meseta) \\
+\code{'up to 2'} & \code{rango} de \code{power}, \code{alpha1} de \code{stable} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\code{check_params()} solo revisa los parámetros que recibe: \code{nugget} no
+le pasa \code{rango}. El signo de \code{sigma} no se revisa.
+
+\subsection{Registro: \code{add_model()}}
+
+\begin{enumerate}
+  \item Si el modelo no viene en el esquema tabular, lo traduce con
+        \code{toSpatFD()}.
+  \item Verifica que los ids sean \emph{scores} del objeto o parejas de
+        ellos, y que los modelos existan en \code{models}.
+  \item Compila con \code{compile_model()} y calcula las mesetas totales por id.
+  \item Guarda la entrada (\code{table}, \code{variograms}, \code{sills}) con
+        \code{set_models()}. Un nombre repetido reemplaza el modelo sin cambiar
+        su posición; sin nombre, se usa \code{next_model_name()}.
+\end{enumerate}
+
+\subsection{Compilación: \code{compile_model()}}
+
+Para cada id, cada fila de la tabla se convierte en un \emph{closure}
+\code{function(h) do.call(model, c(list(h), args))}, y el variograma es
+la suma de esos \emph{closures}. Los parámetros en \code{NA} se omiten, de modo
+que el modelo usa su valor por defecto. Cada estructura se evalúa una vez con
+\code{numeric(0)} al compilar: así un parámetro inválido falla al registrar el
+modelo y no al predecir.
+
+% ======================================================================
+\section{Predicción}
+
+\subsection{Recorrido de una llamada}
+
+\begin{footnotesize}
+\begin{verbatim}
+predict.SpatFD(object, newcoords, model, variable, method, kriging, n)
+ |-- si newcoords es sf/sfc:  map_grid()  -> grilla regular dentro del mapa
+ |-- method = "scores":  predict_scores()
+ |     `-- krige_scores()
+ |           |-- prediction_setup()     verifica y prepara
+ |           |-- score_covariances()    C(h) = meseta - gamma(h), por pareja de scores
+ |           `-- solve_kriging()        resuelve el sistema (simple u ordinario)
+ |-- method = "lambda":  predict_lambda()
+ |     |-- prediction_setup()
+ |     |-- score_covariances()
+ |     `-- sistema propio (bloques por variable), con constrained_solve() si es ordinario
+ `-- arma el objeto SpatFDpred
+\end{verbatim}
+\end{footnotesize}
+
+\subsection{\code{prediction_setup()}}
+
+Es el paso común a los dos métodos. Escoge el modelo (si hay uno solo, no hace
+falta nombrarlo), elige las variables (por defecto, todas las que cubre el
+modelo), ordena las columnas de \code{newcoords} según las del objeto (por
+nombre, o por posición si no tienen nombre) y separa, para cada \emph{score},
+los sitios donde se observó y sus valores. Devuelve:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Elemento & Contenido \\
+\midrule
+\code{model}, \code{compiled} & Nombre del modelo y su entrada compilada \\
+\code{pcs} & Lista: los ids de los \emph{scores} de cada variable \\
+\code{sites}, \code{values} & Sitios y valores observados de cada \emph{score} \\
+\code{newcoords} & Coordenadas verificadas, con nombres de fila \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Todos los errores sobre el modelo incluyen \code{models_message()}, la tabla de
+modelos del objeto.
+
+\subsection{\code{score_covariances()}}
+
+Devuelve una matriz-lista $q \times q$ (una fila y una columna por
+\emph{score}) con la función de covarianza de cada pareja, $C(h) = C(0) -
+\gamma(h)$. Las parejas sin variograma cruzado quedan en \code{NULL}, es decir,
+independientes. Los modelos sin meseta (\code{unbounded_models}: \code{linear},
+\code{power}, \code{logarithmic}, \code{spline}, \code{legendre}) solo se
+admiten con kriging ordinario, con la pseudo-covarianza $C(h) = -\gamma(h)$
+(sección~\ref{sec:ordinario}); con kriging simple dan un error.
+
+\subsection{Kriging simple y ordinario}
+\label{sec:ordinario}
+
+\code{predict()} y \code{leave_one_out()} reciben \code{kriging}, por defecto
+\code{"ordinary"}. El simple supone media conocida e igual a cero (los
+\emph{scores} están centrados). El ordinario supone una media constante
+desconocida y agrega una restricción por campo: los pesos del campo que se
+predice suman 1 y los de cada uno de los demás suman 0 (cokriging ordinario).
+\code{constrained_solve()} arma y resuelve, por LU, el sistema
+\[
+  \begin{pmatrix} \Sigma & F \\ F^T & 0 \end{pmatrix}
+  \begin{pmatrix} W \\ M \end{pmatrix} =
+  \begin{pmatrix} C_0 \\ E \end{pmatrix},
+  \qquad
+  \sigma^2 = C(0) - \textstyle\sum_{\text{columna}} [C_0; E] \circ [W; M],
+\]
+donde $F$ marca las filas de cada campo y $E$ el campo objetivo de cada
+columna. Dos consecuencias de las restricciones guían el diseño:
+\begin{itemize}
+  \item \textbf{Las constantes se cancelan.} Sumar una constante a un bloque de
+        covarianzas no cambia ni los pesos ni los multiplicadores ni la
+        varianza. Por eso los modelos sin meseta funcionan con $C(h) =
+        -\gamma(h)$, y los que tienen meseta conservan $C(h) = C(0) - \gamma(h)$,
+        que está mejor condicionada.
+  \item \textbf{Da igual centrar las curvas.} En lambda, como los pesos de la
+        variable objetivo suman 1 y los de las demás 0, las medias se cancelan:
+        $\hat\chi^r = \sum_p \sum_i \lambda^{rp}_i \chi^p_{s_i}$ con las curvas
+        sin centrar. El código sigue sumando la media a las curvas centradas,
+        que es la misma cuenta y vale también para el simple.
+\end{itemize}
+La matriz del ordinario no es definida positiva, así que no se usa Cholesky.
+Las dos variantes se comparan con \code{gstat} (con y sin \code{beta = 0}) en
+\code{test-predict.R}, \code{test-ordinary.R} y \code{dev/02_comparacion_gstat.R}.
+
+\subsection{Método \code{"scores"}: \code{solve_kriging()}}
+
+Resuelve el kriging de $q$ campos escalares (los \emph{scores}). El
+detalle matemático está en \code{dev/diseno_solver.pdf}; las decisiones de
+implementación son:
+
+\begin{itemize}
+  \item \textbf{Grupos.} Los campos conectados, directa o indirectamente, por
+        covarianzas cruzadas forman un grupo, y cada grupo se resuelve por
+        separado. Sin cruzados hay un kriging por \emph{score}; con un modelo
+        lineal de corregionalización completo hay un solo sistema de cokriging.
+  \item \textbf{Distancias.} Se calculan una vez por conjunto distinto de
+        sitios (los \emph{scores} de una variable comparten sitios) y se
+        guardan en caché.
+  \item \textbf{Simple: un Cholesky por grupo.} Con $\Sigma = R^T R$ y $V =
+        R^{-T} C_0$, la predicción es $V^T (R^{-T} z)$ y la varianza $C(0) -
+        \sum V^2$ por columna, sin calcular los pesos. Si Cholesky falla, la
+        matriz no es definida positiva: hay sitios duplicados o el modelo no es
+        válido.
+  \item \textbf{Ordinario: un LU por grupo} con \code{constrained_solve()}, con
+        una restricción por campo del grupo.
+  \item \textbf{Distancia cero exacta.} \code{cross_dist()} calcula la
+        distancia coordenada a coordenada para que la de un sitio consigo
+        mismo sea exactamente 0. De eso depende el efecto pepita.
+\end{itemize}
+
+\code{predict_scores()} reconstruye después cada curva sobre los coeficientes
+de la base: $\text{coefs} = \Xi\, \hat{f} + \text{coefs}(\mu)$, con $\Xi$ los
+coeficientes de las funciones propias.
+
+\subsection{Método \code{"lambda"}: cokriging funcional}
+
+\code{predict_lambda()} implementa el predictor de Bohórquez, Giraldo y Mateu
+(2017), con las curvas centradas:
+\[
+  \hat\chi^r_{s_0}(t) = \mu^r(t) + \sum_{p} \sum_{i}
+  \lambda^{rp}_i \bigl(\chi^p_{s_i}(t) - \mu^p(t)\bigr).
+\]
+Pasos:
+
+\begin{enumerate}
+  \item \textbf{Intervalo común} $T$: la intersección de los intervalos de las
+        variables. Si no coinciden, avisa con un mensaje; si no se cruzan, da
+        un error.
+  \item \textbf{Matrices} $G^{pq}_{kl} = \int_T \xi^p_k \xi^q_l\,dt$. Para una
+        variable observada en todo $T$, $G^{pp}$ es exactamente la identidad
+        (no se calcula). En los demás casos se usa \code{inner_product()}.
+  \item \textbf{Covarianza entre curvas} de cada pareja de variables,
+        $\Omega_{pq}(h) = \sum_{k,l} G^{pq}_{kl}\, C_{pk,ql}(h)$, como función de
+        $h$. Es \code{NULL} si no hay ningún término.
+  \item \textbf{Sistema} con un bloque por pareja de variables. Simple:
+        $\Sigma \lambda = C_0$ con un Cholesky. Ordinario:
+        \code{constrained_solve()} con una restricción por variable. Para cada
+        variable objetivo solo cambian $C_0$ y la restricción.
+  \item \textbf{Curvas}: se evalúan en los tiempos de la variable dentro de
+        $T$. Esa matriz es exactamente la predicción y es la que recibe el
+        usuario.
+  \item \textbf{Varianza}: $\Omega_{rr}(0) - C_0^T \lambda$ (menos el
+        multiplicador en el ordinario), con las mesetas del modelo. No puede
+        ser negativa.
+  \item \textbf{Versión funcional} (solo para graficar): la matriz se proyecta
+        por mínimos cuadrados en la base de la variable, o en B-splines sobre
+        $T$ si el intervalo es más corto.
+\end{enumerate}
+
+Este método no usa \code{solve_kriging()}: el sistema es pequeño (un bloque por
+variable, no por \emph{score}) y escribirlo aparte resultó más claro que
+generalizar el \emph{solver} a valores matriciales.
+
+\subsection{\code{inner_product()}}
+
+\code{fda::inprod()} se detiene en un error relativo de $10^{-4}$, que no basta
+para un sistema que se verifica a $10^{-8}$. \code{inner_product()} usa la
+matriz exacta de productos internos de la base (\code{eval.penalty}) cuando las
+dos curvas están en la misma base y se integra en todo su intervalo. Si no,
+integra por Gauss-Legendre de 5 puntos en 1000 tramos (error de $10^{-15}$ con
+Fourier y $10^{-9}$ con B-splines en las pruebas).
+
+\subsection{El objeto \code{SpatFDpred}}
+
+\begin{footnotesize}
+\begin{verbatim}
+pred                                  lista, clase "SpatFDpred"
+|-- $PM10
+|   |-- $pred   matriz: tiempos x sitios nuevos (curvas evaluadas)
+|   `-- $var    vector: varianza de predicción por sitio nuevo
+|-- attr(, "newcoords")   coordenadas de los sitios nuevos
+|-- attr(, "method")      "scores" o "lambda"
+|-- attr(, "crossed")     si se usó alguna covarianza cruzada
+|-- attr(, "map")         el mapa sf, si se predijo sobre uno
+`-- attr(, "internal")
+    |-- $pred       curvas predichas como fd, por variable
+    |-- $observed   curvas observadas como fd, por variable
+    `-- $coords     coordenadas de los sitios observados
+\end{verbatim}
+\end{footnotesize}
+
+\noindent
+Contrato de los métodos: \code{predict_scores()} y \code{predict_lambda()}
+devuelven \code{list(curves, newcoords, crossed)}, donde \code{curves} tiene por
+variable \code{fd}, \code{pred} y \code{var}. Un método nuevo solo tiene que
+cumplir ese contrato y agregarse al \code{switch} de \code{predict.SpatFD}.
+
+% ======================================================================
+\section{Gráficos}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{l L}
+\toprule
+Función & Qué dibuja \\
+\midrule
+\code{plot.SpatFD}, \code{mode = "functional"} & Curvas suavizadas, con \code{plot.fd} de \code{fda} \\
+\code{plot.SpatFD}, \code{mode = "pca"} & Todos los componentes en una página (\code{plot_components()}), con \code{plot.pca.fd} componente a componente \\
+\code{plot.SpatFDpred}, \code{mode = "curves"} & Observadas en gris y predichas en color (\code{plot_curves()}) \\
+\code{plot.SpatFDpred}, \code{mode = "map"} & Predicción en un instante y varianza, lado a lado (\code{plot_maps()}) \\
+\code{availablemodels()} & Los modelos de variograma en una grilla de $5 \times 5$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Política de \code{ask}.} Ningún gráfico del paquete pide
+\code{<Enter>}. Cada uno guarda \code{par(ask = FALSE)} al empezar y restaura el
+estado del dispositivo al salir con \code{on.exit(..., add = TRUE)}. La razón:
+\code{fda::plot.pca.fd()} dibuja una página por componente y activa
+\code{ask}; si el dispositivo queda en ese modo, R pide \code{<Enter>} antes de
+cada gráfico nuevo, aunque sea el único. La única excepción es
+\code{plot(sfd, multiple = TRUE)}, que el usuario pide explícitamente. La prueba
+\code{test-plots.R} deja el dispositivo en modo \code{ask} y comprueba con el
+\emph{hook} \code{before.plot.new} que ninguna página nueva se abre en ese modo.
+
+\textbf{Mapas.} \code{map_grid()} toma cerca de \code{n} puntos regulares
+dentro del mapa con \code{sf::st_sample(type = "regular")}. \code{plot_maps()}
+reconstruye la grilla para \code{image()} a partir del paso mínimo entre
+coordenadas y arma la página con \code{layout()}: título, subtítulo, dos barras
+de color y dos mapas.
+
+% ======================================================================
+\section{Validación cruzada: \code{leave_one_out()}}
+
+Para cada sitio de la variable:
+
+\begin{enumerate}
+  \item \code{refit()} repite el suavizamiento y el PCA de la variable sin el
+        sitio, con los mismos \code{args} y el mismo número de componentes. Las
+        otras variables se reconstruyen una sola vez, sin quitar nada.
+  \item Las funciones propias nuevas toman el signo de las originales (por el
+        signo de su producto interno). El signo de una componente es arbitrario,
+        pero los variogramas cruzados del modelo dependen de él.
+  \item Se registran de nuevo los modelos con su tabla original: los
+        variogramas \textbf{no} se vuelven a ajustar.
+  \item Se predice el sitio con cada combinación de modelo y método, y se mide
+        el error con \code{curve_distance()}: la norma $L^2$ de la diferencia,
+        exacta si las curvas comparten base y por \code{inner_product()} si no
+        (por ejemplo, lambda sobre un intervalo común más corto).
+\end{enumerate}
+
+\noindent
+Devuelve un \code{SpatFDloo}: \code{summary} (una fila por combinación,
+ordenada por error medio), \code{errors} (sitios $\times$ combinaciones) y
+\code{pred} (por combinación, matriz tiempos $\times$ sitios; \code{NA} fuera
+del intervalo en que se predijo).
+
+% ======================================================================
+\section{Pruebas}
+\label{sec:pruebas}
+
+Se corren con \code{devtools::test()}. Cada archivo usa datos simulados
+pequeños (10 sitios, 50 tiempos) y \code{gstat} como referencia externa
+siempre que existe.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{l L}
+\toprule
+Archivo & Qué verifica \\
+\midrule
+\code{test-spatfd.R} & Construcción, \code{+} (incluido el caso \code{s1}/\code{s10}), orden de \code{togstat()}, que solo se expongan \code{scores}, \code{variance} y \code{models} \\
+\code{test-models.R} & Los 18 espejos contra \code{gstat::variogramLine()}, estructuras anidadas, dominios de los parámetros, \code{toSpatFD()} \\
+\code{test-predict.R} & Kriging y cokriging de \emph{scores} contra \code{gstat}; lambda univariado contra las fórmulas escritas a mano; cokriging funcional contra el sistema por bloques; intervalos distintos; mapas; validación de argumentos; registro de modelos \\
+\code{test-leave_one_out.R} & Cada error es el de repetir el análisis sin el sitio; diseños; modelos multivariados; intervalos distintos \\
+\code{test-ordinary.R} & Kriging y cokriging ordinario contra \code{gstat}; modelos sin meseta; lambda ordinario independiente de centrar, contra el sistema con restricciones; \code{leave_one_out()} ordinario por defecto \\ \code{test-plots.R} & Ningún gráfico pide \code{<Enter>}; los componentes van en una página; \code{plot()} devuelve el objeto de forma invisible \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\noindent
+Las pruebas pueden usar las funciones internas (\code{testthat} carga el
+paquete con \code{load_all()}). Además, \code{dev/02_comparacion_gstat.R} repite
+las comparaciones con \code{gstat} sobre los datos reales de México y se detiene
+si alguna diferencia relativa supera $10^{-8}$.
+
+% ======================================================================
+\section{Cómo extender el paquete}
+
+\subsection{Agregar un modelo de variograma}
+\begin{enumerate}
+  \item Agregar la función a la lista \code{models} en \code{models.R}, con
+        \code{check_params()} al inicio y \code{h = 0} resuelto explícitamente
+        si la fórmula da \code{NaN} ahí.
+  \item Si tiene equivalente en \code{gstat}, agregar la traducción en
+        \code{toSpatFD.gstat()} y el caso en la prueba de espejos.
+  \item Si no tiene meseta, agregarlo a \code{unbounded_models} en
+        \code{kriging.R}: solo se podrá usar con kriging ordinario.
+  \item Actualizar la documentación de \code{models}.
+\end{enumerate}
+
+\subsection{Agregar un traductor (por ejemplo, \code{geoR})}
+Escribir un método \code{toSpatFD.<clase>()} en \code{gstat.R} (o en un archivo
+propio) que devuelva el esquema tabular. \code{add_model()} lo usa sin cambios.
+
+\subsection{Agregar un método de predicción}
+Escribir \code{predict_<nombre>()} con el contrato de la sección anterior,
+agregarlo al \code{switch} y a \code{match.arg()} de \code{predict.SpatFD}, y
+documentarlo en \code{@details} y \code{@section Theory}.
+\code{leave_one_out()} lo admite si se agrega al diseño por defecto.
+
+\subsection{Cambiar la estructura interna}
+Solo hay que tocar \code{utils.R} (constructor y accesores) y las pruebas de
+estructura de \code{test-spatfd.R}. Si un cambio obliga a tocar otros archivos,
+probablemente se está saltando un accesor.
+
+\subsection{Antes de cada \emph{commit}}
+\begin{footnotesize}
+\begin{verbatim}
+devtools::document()     # NAMESPACE y man/
+devtools::test()
+source("dev/02_comparacion_gstat.R")
+devtools::check()        # 0 errores y 0 warnings
+\end{verbatim}
+\end{footnotesize}
+
+% ======================================================================
+\section{Limitaciones conocidas}
+
+\begin{itemize}
+  \item Media constante: el kriging ordinario estima una media constante;
+        todavía no hay kriging universal (media con tendencia espacial).
+  \item Vecindario global y distancias euclidianas: sirve para coordenadas
+        proyectadas y un número moderado de sitios.
+  \item El método lambda con varias variables supone que los \code{t} de
+        \code{spatfd()} están en una escala común. En los datos de México
+        (\code{t = 1, 2, ...}) eso equivale a suponer que PM10 y NO2 empiezan a
+        la misma hora.
+  \item Solo se traducen modelos de \code{gstat}, sin anisotropía.
+  \item Falta migrar desde la versión CRAN el muestreo óptimo, la
+        clasificación y la simulación.
+\end{itemize}
+
+\end{document}

@@ -27,7 +27,7 @@ sequentially: \code{"model 1"}, \code{"model 2"}, ... If the name is already in
 use, that model is replaced.}
 }
 \value{
-\code{sfd}, invisibly.
+\code{sfd} with the model added.
 }
 \description{
 Registers a set of fitted variogram models inside a \code{SpatFD} object under a
@@ -36,12 +36,10 @@ several models, so that they can be compared later; each one is compiled
 only once, when it is added.
 }
 \details{
-The model is added to \code{sfd} \strong{in place}: there is no need to assign the
-result. The compiled models live in the attribute \code{models}, an environment
-like the other attributes of the object (see \code{\link[=spatfd]{spatfd()}}), so copies of the
-object made with \verb{<-} share the same models.
+Like any other modelling function in R, \code{add_model()} returns the updated
+object, so the result must be assigned: \code{sfd <- add_model(sfd, model)}.
 
-\code{sfd$models} shows a summary table of the registered models, with one row
+\code{sfd$models} is the summary table of the registered models, with one row
 per model and the columns
 \describe{
 \item{\code{variables}}{Functional variables the model covers.}
@@ -50,10 +48,6 @@ per model and the columns
 \item{\code{cross}}{Whether it includes cross-variograms.}
 \item{\code{sill}}{Sum of the sills of the direct variograms.}
 }
-
-Each entry of \code{attr(sfd, "models")} is a list with the table of the model
-(\code{table}), the compiled variograms (\code{variograms}, a named list of functions
-of the distance \code{h}) and their sills (\code{sills}).
 }
 \section{Theory}{
 
@@ -82,20 +76,17 @@ df <- data.frame(
   alpha1 = c(NA, NA, NA)
 )
 
-add_model(sfd, df)
-add_model(sfd, df[df$model != "nugget", ], name = "no nugget")
+sfd <- add_model(sfd, df)
+sfd <- add_model(sfd, df[df$model != "nugget", ], name = "no nugget")
 
 # Fitted models of gstat are translated on the way in
 fitted <- list(
   "sim.PC1" = gstat::vgm(psill = 30, model = "Sph", range = 0.5),
   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Sph", range = 0.5)
 )
-add_model(sfd, fitted, name = "spherical")
+sfd <- add_model(sfd, fitted, name = "spherical")
 
 sfd$models
-
-vg <- attr(sfd, "models")[["model 1"]]$variograms
-vg$sim.PC1(c(0, 0.1, 0.5, 2))
 
 }
 \references{

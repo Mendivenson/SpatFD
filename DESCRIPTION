@@ -74,10 +74,8 @@ Imports:
     graphics,
     grDevices,
     gstat,
-    knitr,
     sp,
     stats,
-    stringr,
     utils
 Suggests:
     sf,

@@ -348,11 +348,14 @@ max(abs(curva - pred$PM10$pred$coefs))      # del orden de 1e-13
 \section{Integración de \code{lambda} multivariado}
 
 \noindent
-\textbf{Estado: no implementado.} Lo que sigue es una propuesta. Es la
-extensión directa del criterio univariado y no existe en la versión CRAN, de
-modo que no hay una implementación de referencia contra la cual compararla.
-Conviene contrastarla con la formulación de Bohórquez, Giraldo y Mateu (2017)
-antes de programarla.
+\textbf{Estado: implementado} en \code{predict\_lambda()}, con estas
+diferencias frente a la propuesta original: las curvas se centran también en
+el caso univariado, la varianza usa las mesetas del modelo, y las variables con
+intervalos de tiempo distintos se combinan sobre el intervalo común, calculando
+$G$ también dentro de cada variable (deja de ser la identidad). El sistema se
+resuelve aparte, sin modificar \code{simple\_kriging()}. Coincide con la
+formulación de Bohórquez, Giraldo y Mateu (2017). Lo que sigue es la propuesta
+tal como se escribió.
 
 \subsection{El sistema}
 
