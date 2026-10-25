@@ -1,7 +1,7 @@
 Package: SpatFD
 Type: Package
 Title: Functional Geostatistics: Univariate and Multivariate Functional Spatial Prediction
-Version: 0.0.1.9000
+Version: 0.0.2.9000
 Authors@R: c(person(given = c("Martha","Patricia"),
        family = "Bohorquez Castañeda",
        role = c("aut","cre"),
@@ -73,12 +73,13 @@ Imports:
     fda,
     graphics,
     grDevices,
-    gstat,
-    sp,
     stats,
     utils
 Suggests:
+    gstat,
+    plotly,
     sf,
+    sp,
     testthat (>= 3.0.0)
 LazyData: false
 Config/testthat/edition: 3

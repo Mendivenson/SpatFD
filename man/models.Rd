@@ -71,6 +71,6 @@ Pebesma, E. J. (2004). Multivariable geostatistics in S: the gstat package.
 }
 \seealso{
 \code{\link[=availablemodels]{availablemodels()}} to list or plot the models, and
-\code{\link[=add_model]{add_model()}} to register models built from them in a \code{SpatFD} object.
+\code{\link[=spatfd_model]{spatfd_model()}} to build a model from a data frame of them.
 }
 \keyword{datasets}

@@ -2,116 +2,98 @@
 % Please edit documentation in R/leave_one_out.R
 \name{leave_one_out}
 \alias{leave_one_out}
-\alias{print.SpatFDloo}
-\title{Leave-one-out cross-validation of models and prediction methods}
+\title{Leave-one-out cross-validation of spatial functional models}
 \usage{
-leave_one_out(sfd, design = NULL, variable = NULL, kriging = "ordinary")
-
-\method{print}{SpatFDloo}(x, ...)
+leave_one_out(..., variable = NULL, method = c("scores", "lambda"))
 }
 \arguments{
-\item{sfd}{An object of class \code{SpatFD} with at least one model registered,
-see \code{\link[=add_model]{add_model()}}.}
+\item{...}{Objects of class \code{SpatFDmodel}, as returned by \code{\link[=spatfd_model]{spatfd_model()}}.
+They are labelled with the names of their arguments
+(\code{leave_one_out(a, other = b)}) or, without a name, with the expression
+given.}
 
-\item{design}{Data frame with the combinations to compare, one per row,
-with the columns \code{model} (name of a model registered in \code{sfd}) and
-\code{method} (\code{"scores"} or \code{"lambda"}). By default, every model that covers
-the variable is combined with every method it can be used with.}
+\item{variable}{Character vector with the names of the variables to
+validate. Defaults to every variable of the models. A model is only
+validated on the variables it has.}
 
-\item{variable}{Name of the variable whose curves are predicted. Defaults
-to the first variable of the object, see \code{\link[=var_names]{var_names()}}.}
-
-\item{kriging}{Type of kriging used in every combination: \code{"ordinary"} (the
-default) or \code{"simple"}, see \link[=predict.SpatFD]{predict()}. With
-\code{"simple"}, the default design leaves out the models without a sill.}
-
-\item{x}{An object of class \code{SpatFDloo}, as returned by \code{leave_one_out()}.}
-
-\item{...}{Ignored.}
+\item{method}{Prediction methods to compare: \code{"scores"}, \code{"lambda"} or
+both (the default). See \link[=predict.SpatFDmodel]{predict()}.}
 }
 \value{
 An object of class \code{SpatFDloo}: a list with
 \describe{
-\item{\code{summary}}{Data frame with one row per combination, from the
-smallest to the largest mean error: \code{model}, \code{method}, \code{crossed}
-(whether cross-variograms were used), \code{mean} and \code{sd} (mean and
-standard deviation of the errors over the sites) and \code{max} (largest
-error).}
-\item{\code{errors}}{Matrix with the error of every site (rows) for every
-combination (columns).}
-\item{\code{pred}}{List with the curves predicted for every combination, as a
-matrix with one row per time of the observed data and one column per
-site, the same layout as the data given to \code{\link[=spatfd]{spatfd()}}.}
+\item{\code{summary}}{List with one table per variable, with one row per
+model and method: the \code{mean}, standard deviation (\code{sd}) and maximum
+(\code{max}) of the errors of the sites, from the smallest to the largest
+mean error.}
+\item{\code{errors}}{List with one table per variable, with the error of
+every site for every model and method.}
+\item{\code{pred}}{List with one element per variable and, inside, one per
+model and method (\verb{<model>.<method>}): the curves predicted at each site
+when it was left out, with one row per time and one column per site.}
 }
 }
 \description{
-Compares variogram models and prediction methods by leave-one-out
-cross-validation. Each site of a variable is left out in turn, its curve is
-predicted from the remaining sites with \link[=predict.SpatFD]{predict()}, and
-the prediction is compared with the curve that was observed there.
+Compares models and prediction methods by leave-one-out cross-validation.
+Each site of a variable is left out in turn, its curve is predicted from
+the remaining sites with \link[=predict.SpatFDmodel]{predict()}, and the
+prediction is compared with the curve observed there.
 }
 \details{
-For every site left out, the whole analysis of the variable is repeated
-without it, with the same arguments given to \code{\link[=spatfd]{spatfd()}} and the same number
-of principal components: the curve left out takes no part in the mean
-function or in the principal components used to predict it. The variogram
-models are \strong{not} fitted again; they are the ones registered in \code{sfd}.
+\strong{What is repeated for each site.} The whole analysis of the variable is
+repeated without the site, with the same data, times and arguments given
+to \code{\link[=spatfd]{spatfd()}} and the same number of components of the model, so the curve
+left out takes no part in the mean or in the components used to predict
+it. The components obtained without the site are given the sign of the
+ones of the whole analysis, so that the cross-variograms keep their
+meaning. The variogram models are \strong{not} fitted again: they are the ones
+of the model. The other variables of the model keep their observation at
+that site.
 
-The principal components obtained without a site are given the same sign
-as the ones of the full analysis, so that the cross-variograms of a model
-keep their meaning.
+\strong{The error of a site.} The error of the prediction at a site is a curve
+in time, \eqn{e(t) = \chi(t) - \hat\chi(t)}, the difference between the
+observed (smoothed) curve and the predicted one: at each time, how far the
+prediction was. It is summarised in a single number, the root mean square
+error over time,
+\deqn{RMSE = \sqrt{\frac{1}{|T|} \int_T e(t)^2 \, dt}}
+computed as the mean over the times of the data (exactly the integral
+when they are equally spaced). It is in the units of the data: a typical
+distance between the predicted and the observed curve along the interval.
+The predicted curves are kept in \code{pred}, so the error curves can be drawn.
 
-With a model that covers several variables (cokriging), only the curve of
-\code{variable} is left out: the other variables keep their observation at that
-site, when they have one. Both methods use every variable of the model.
-
-With the method \code{"lambda"} and variables observed over different time
-intervals, the curves are predicted, and the errors measured, only over the
-common interval (see \link[=predict.SpatFD]{predict()}). Those errors are then
-not directly comparable with the ones of the method \code{"scores"}.
+\strong{Method \code{"lambda"} with several variables.} The curves of several
+variables can only be combined over the times they share, so the method
+\code{"lambda"} predicts, and its error is measured, only over the time
+interval common to the variables of the model. When the variables span
+different intervals, those errors are not directly comparable with the
+ones of the method \code{"scores"}, which uses the whole interval of the
+variable.
 }
-\section{Theory}{
-
-The error at the site \eqn{s_i} is the distance between the observed
-(smoothed) curve and the curve predicted without it,
-\deqn{\| \chi_{s_i} - \hat{\chi}_{s_i}^{(-i)} \| = \left( \int_T \left(
-  \chi_{s_i}(t) - \hat{\chi}_{s_i}^{(-i)}(t) \right)^2 dt \right)^{1/2}}
-A combination of model and method predicts better the smaller its mean
-error is (Bohorquez, Giraldo and Mateu, 2017).
-}
-
 \examples{
 set.seed(1)
-t <- 1:50
-dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(50, sd = 0.1))
+dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * (1:50) / 50) + rnorm(50, sd = 0.1))
 colnames(dat) <- paste0("s", 1:10)
 coords <- cbind(x = runif(10), y = runif(10))
 rownames(coords) <- colnames(dat)
-sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
+sim <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
 
-sfd <- add_model(sfd, list(
-  "sim.PC1" = gstat::vgm(psill = 30, model = "Exp", range = 0.5),
-  "sim.PC2" = gstat::vgm(psill = 0.01, model = "Exp", range = 0.5)
-), name = "exponential")
-sfd <- add_model(sfd, list(
-  "sim.PC1" = gstat::vgm(psill = 30, model = "Sph", range = 0.8),
-  "sim.PC2" = gstat::vgm(psill = 0.01, model = "Sph", range = 0.8)
-), name = "spherical")
+exponential <- spatfd_model(sim, model = data.frame(var = c("sim.PC1", "sim.PC2"),
+                                                    model = "exponential", rango = 0.5,
+                                                    sigma = c(30, 0.1)))
+spherical   <- spatfd_model(sim, model = data.frame(var = c("sim.PC1", "sim.PC2"),
+                                                    model = "spherical", rango = 0.8,
+                                                    sigma = c(30, 0.1)))
 
-# Every model with every method
-loo <- leave_one_out(sfd)
+loo <- leave_one_out(exponential, spherical)
 loo
-
-# Or only some combinations
-leave_one_out(sfd, design = data.frame(model  = c("exponential", "spherical"),
-                                       method = c("scores", "scores")))
+loo$summary$sim
 
 }
 \references{
-Bohorquez, M., Giraldo, R. and Mateu, J. (2017). Multivariate functional
+Bohórquez, M., Giraldo, R. and Mateu, J. (2017). Multivariate functional
 random fields: prediction and optimal sampling. \emph{Stochastic Environmental
 Research and Risk Assessment}, 31, 53-70. \doi{10.1007/s00477-016-1266-y}
 }
 \seealso{
-\code{\link[=add_model]{add_model()}}, \link[=predict.SpatFD]{predict()}
+\code{\link[=spatfd_model]{spatfd_model()}}, \link[=predict.SpatFDmodel]{predict()}
 }

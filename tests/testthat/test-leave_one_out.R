@@ -1,10 +1,9 @@
 sim_data <- function(sites, seed) {
   set.seed(seed)
-  t <- 1:50
-  dat <- sapply(sites, function(i) {
-    rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(1) * cos(2 * pi * t / 50) + rnorm(50, sd = 0.1)
-  })
-  colnames(dat) <- sites
+  dat <- data.frame(time = 1:50)
+  for (s in sites) {
+    dat[[s]] <- rnorm(1, 5) * sin(2 * pi * (1:50) / 50) + rnorm(1) * cos(2 * pi * (1:50) / 50) + rnorm(50, sd = 0.1)
+  }
   dat
 }
 
@@ -13,124 +12,111 @@ set.seed(1)
 coords <- cbind(x = runif(10), y = runif(10))
 rownames(coords) <- sites
 
-new_a <- function(dat = sim_data(sites, 1)) {
-  spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "a")
-}
-new_b <- function() {
-  spatfd(sim_data(sites[1:8], 2), coords, basis = "fourier", nbasis = 11, nharm = 1, name = "b")
-}
+a <- spatfd(sim_data(sites, 1), coords, basis = "fourier", nbasis = 11, nharm = 2, name = "a")
+b <- spatfd(sim_data(sites[1:7], 2), coords, basis = "fourier", nbasis = 11, nharm = 1, name = "b")
 
-exponential <- list(a.PC1 = gstat::vgm(30, "Exp", 0.5, nugget = 2), a.PC2 = gstat::vgm(1, "Exp", 0.5))
-spherical   <- list(a.PC1 = gstat::vgm(30, "Sph", 0.8, nugget = 2), a.PC2 = gstat::vgm(1, "Sph", 0.8))
+exponential <- spatfd_model(a, model = list(a.PC1 = gstat::vgm(20, "Exp", 0.4, nugget = 1),
+                                            a.PC2 = gstat::vgm(2, "Exp", 0.4)))
+spherical   <- spatfd_model(a, model = list(a.PC1 = gstat::vgm(20, "Sph", 0.8, nugget = 1),
+                                            a.PC2 = gstat::vgm(2, "Sph", 0.8)))
+both        <- spatfd_model(a, b, model = list(a.PC1 = gstat::vgm(20, "Exp", 0.4, nugget = 1),
+                                               b.PC1 = gstat::vgm(5, "Exp", 0.4, nugget = 1)))
 
-test_that("leave_one_out() compares every model with every method by default", {
-  a <- new_a() |>
-    add_model(exponential, name = "exponential") |>
-    add_model(spherical, name = "spherical")
-
-  loo <- leave_one_out(a)
+# ================================ SALIDA ======================================
+test_that("leave_one_out() returns one table per variable", {
+  loo <- leave_one_out(exponential, spherical)
 
   expect_s3_class(loo, "SpatFDloo")
-  expect_named(loo, c("summary", "errors", "pred"))
-  expect_named(loo$summary, c("model", "method", "crossed", "mean", "sd", "max"))
-  expect_equal(nrow(loo$summary), 4)
-  expect_setequal(paste(loo$summary$model, loo$summary$method),
-                  c("exponential scores", "exponential lambda", "spherical scores", "spherical lambda"))
-  expect_false(is.unsorted(loo$summary$mean))                 # del menor al mayor error
-  expect_false(any(loo$summary$crossed))
+  expect_named(loo$summary, "a")
+  expect_named(loo$summary$a, c("model", "method", "mean", "sd", "max"))
+  expect_equal(nrow(loo$summary$a), 4)                         # 2 modelos x 2 métodos
+  expect_false(is.unsorted(loo$summary$a$mean))                # Del menor al mayor error
+  expect_setequal(loo$summary$a$model, c("exponential", "spherical"))
 
-  expect_equal(dim(loo$errors), c(10, 4))
-  expect_equal(rownames(loo$errors), sites)
-  expect_true(all(loo$errors > 0))
-  expect_equal(loo$summary$mean, unname(sort(colMeans(loo$errors))))
-
-  # Las curvas predichas son matrices tiempos x sitios, como los datos de entrada
-  expect_true(is.matrix(loo$pred[["exponential / scores"]]))
-  expect_equal(dim(loo$pred[["exponential / scores"]]), c(50, 10))
-  expect_equal(colnames(loo$pred[["exponential / scores"]]), sites)
-
-  # El registro de modelos del objeto original no cambia
-  expect_equal(rownames(a$models), c("exponential", "spherical"))
+  expect_equal(nrow(loo$errors$a), 10 * 4)                     # Un error por sitio y combinación
+  expect_named(loo$pred$a, c("exponential.scores", "exponential.lambda", "spherical.scores", "spherical.lambda"))
+  expect_equal(dim(loo$pred$a$exponential.scores), c(50, 10))
+  expect_output(print(loo), "Leave-one-out cross-validation")
 })
 
-test_that("each error is the one of predicting the site after repeating the analysis without it", {
-  dat <- sim_data(sites, 1)
-  a   <- add_model(new_a(dat), exponential, name = "exponential")
-  loo <- leave_one_out(a)
+test_that("every variable of the models is validated, each with its own models", {
+  loo <- leave_one_out(exponential, both, method = "scores")
+  expect_named(loo$summary, c("a", "b"))
+  expect_setequal(loo$summary$a$model, c("exponential", "both"))
+  expect_equal(loo$summary$b$model, "both")                    # Solo 'both' tiene a b
+  expect_equal(nrow(loo$errors$b), 7)
 
-  without <- add_model(new_a(dat[, sites != "s3"]), exponential, name = "exponential")
-
-  observed <- get_fd(a, "a")
-  gram     <- fda::eval.penalty(observed$basis, fda::int2Lfd(0))
-
-  for (method in c("scores", "lambda")) {
-    pred       <- predict(without, coords["s3", , drop = FALSE], method = method)
-    difference <- observed$coefs[, "s3"] - predicted_fd(pred, "a")$coefs[, 1]
-
-    label <- paste("exponential /", method)
-    expect_equal(loo$errors["s3", label], sqrt(drop(crossprod(difference, gram %*% difference))),
-                 info = method)
-    expect_equal(unname(loo$pred[[label]][, "s3"]), unname(pred$a$pred[, 1]), info = method)
-  }
+  expect_named(leave_one_out(both, variable = "b", method = "scores")$summary, "b")
+  expect_error(leave_one_out(both, variable = "c"), "Variables not in the models: c")
 })
 
-test_that("the design chooses the combinations to compare", {
-  a <- new_a() |>
-    add_model(exponential, name = "exponential") |>
-    add_model(spherical, name = "spherical")
-
-  design <- data.frame(model = c("spherical", "exponential"), method = c("scores", "lambda"))
-  loo    <- leave_one_out(a, design = design)
-
-  expect_equal(nrow(loo$summary), 2)
-  expect_setequal(colnames(loo$errors), c("spherical / scores", "exponential / lambda"))
-
-  expect_error(leave_one_out(a, design = data.frame(model = "other", method = "scores")),
-               "Models not found in the object: other.*exponential")
-  expect_error(leave_one_out(a, design = data.frame(model = "spherical", method = "other")),
-               "'method' must be")
-  expect_error(leave_one_out(a, design = data.frame(model = "spherical")), "'design' must be")
-  expect_error(leave_one_out(a, variable = "z"), "'variable' must be")
-  expect_error(leave_one_out(new_a()), "no combinations to compare")
+test_that("the models are labelled as in plot()", {
+  loo <- leave_one_out(exponential, other = spherical, method = "scores")
+  expect_setequal(loo$summary$a$model, c("exponential", "other"))
+  expect_error(leave_one_out(a), "must be of class SpatFDmodel")
+  expect_error(leave_one_out(exponential, method = "kriging"), "'method' must be")
 })
 
-test_that("multivariate models are cross-validated one variable at a time", {
-  ab <- new_a() + new_b()
+# ============================ CADA PARTICIÓN ==================================
+test_that("a site is left out of the whole analysis of its variable", {
+  without <- refit_without(get_model_data(exponential)$a, "s4")
 
-  direct  <- c(exponential, list(b.PC1 = gstat::vgm(20, "Exp", 0.5, nugget = 2)))
-  crossed <- toSpatFD(direct)
-  crossed <- rbind(crossed,
-                   transform(crossed[crossed$var == "b.PC1", ], var = "a.PC1.b.PC1", sigma = c(0.5, -10)))
-  ab <- ab |>
-    add_model(direct, name = "direct") |>
-    add_model(crossed, name = "crossed")
-
-  expect_message(loo <- leave_one_out(ab), "Cross-validating the variable a")
-
-  # Cada modelo con cada método, también lambda con variogramas cruzados
-  expect_setequal(paste(loo$summary$model, loo$summary$method),
-                  c("direct scores", "direct lambda", "crossed scores", "crossed lambda"))
-  expect_equal(loo$summary$crossed, loo$summary$model == "crossed")
-  expect_equal(rownames(loo$errors), sites)
-
-  # La otra variable se valida sobre sus propios sitios
-  loo_b <- leave_one_out(ab, variable = "b")
-  expect_equal(rownames(loo_b$errors), sites[1:8])
+  expect_equal(rownames(without$scores), setdiff(sites, "s4"))
+  expect_equal(ncol(get_pca(without)$scores), 2)
+  expect_false(isTRUE(all.equal(get_pca(without)$meanfd$coefs, get_pca(a)$meanfd$coefs)))
 })
 
-test_that("with different time intervals lambda is cross-validated over the common one", {
-  short <- spatfd(sim_data(sites[1:8], 2)[1:40, ], coords, t = 1:40,
-                  basis = "fourier", nbasis = 11, nharm = 1, name = "b")
-  crossed <- toSpatFD(c(exponential, list(b.PC1 = gstat::vgm(20, "Exp", 0.5, nugget = 2))))
-  crossed <- rbind(crossed,
-                   transform(crossed[crossed$var == "b.PC1", ], var = "a.PC1.b.PC1", sigma = c(0.5, -10)))
-  ab <- add_model(new_a() + short, crossed, name = "crossed")
+test_that("the components keep the sign of the whole analysis", {
+  copy    <- get_model_data(exponential)$a
+  without <- refit_without(copy, "s4")
+  G <- inner_product(get_pca(without)$harmonics, get_pca(copy)$harmonics, c(1, 50))
+  expect_true(all(diag(G) > 0))
 
-  loo <- leave_one_out(ab, variable = "a")
+  # Una componente con el signo cambiado vuelve a su signo
+  flipped <- without
+  internal <- attr(flipped, "internal")
+  internal$pca$harmonics$coefs[, 1] <- -internal$pca$harmonics$coefs[, 1]
+  internal$pca$scores[, 1]          <- -internal$pca$scores[, 1]
+  attr(flipped, "internal") <- internal
+  flipped$scores[, "a.PC1"] <- -flipped$scores[, "a.PC1"]
 
-  # Las curvas de lambda solo cubren el intervalo común; las de scores, todo
-  expect_true(all(is.na(loo$pred[["crossed / lambda"]][as.character(41:50), ])))
-  expect_false(anyNA(loo$pred[["crossed / lambda"]][as.character(1:40), ]))
-  expect_false(anyNA(loo$pred[["crossed / scores"]]))
-  expect_true(all(loo$errors > 0))
+  aligned <- align_signs(flipped, copy)
+  expect_equal(get_pca(aligned)$scores, get_pca(without)$scores)
+  expect_equal(aligned$scores, without$scores)
+})
+
+test_that("the error of a site is the prediction made without it", {
+  loo <- leave_one_out(exponential, method = "scores")
+
+  fold <- spatfd_model(refit_without(get_model_data(exponential)$a, "s4"),
+                       model = get_compiled(exponential)$input)
+  p    <- predict(fold, coords["s4", , drop = FALSE])
+  obs  <- fda::eval.fd(1:50, get_fd(a))[, 4]
+
+  expect_equal(unname(loo$pred$a$exponential.scores[, "s4"]), unname(p$a$pred[, 1]))
+  expect_equal(loo$errors$a$error[loo$errors$a$site == "s4"], sqrt(mean((obs - p$a$pred[, 1])^2)))
+})
+
+test_that("the error is a curve in time, summarised by its root mean square", {
+  fd <- fda::fd(matrix(2, 1, 1), fda::create.constant.basis(c(0, 10)))          # La curva constante 2
+  e  <- error_curve(fd, matrix(c(rep(3, 6), rep(1, 5))), 0:10)
+  expect_equal(e, c(rep(-1, 6), rep(1, 5)))
+  expect_equal(sqrt(mean(e^2)), 1)
+})
+
+test_that("plot() draws the error curves of every model and method", {
+  loo <- leave_one_out(exponential, both)
+  curves <- attr(loo, "internal")$curves$a
+  expect_named(curves, c("exponential.scores", "exponential.lambda", "both.scores", "both.lambda"))
+  expect_equal(dim(curves$exponential.scores), c(50, 10))
+
+  # La curva de error es la observada menos la predicha
+  obs <- fda::eval.fd(1:50, get_fd(a))
+  expect_equal(unname(curves$exponential.scores), unname(obs - loo$pred$a$exponential.scores))
+
+  pdf(NULL)
+  on.exit(dev.off())
+  expect_invisible(plot(loo))
+  expect_invisible(plot(loo, variable = "b"))
+  expect_error(plot(loo, variable = "c"), "Variable c was not validated")
 })

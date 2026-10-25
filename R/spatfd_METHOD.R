@@ -1,19 +1,20 @@
 # ============================ MÉTODOS DE SpatFD ===============================
-# Lo que el usuario ve del objeto: los scores, la varianza explicada y la tabla
-# de modelos. La forma funcional se usa para graficar, pero no se imprime.
+# Lo que el usuario ve del objeto: los scores, la varianza explicada y los
+# datos faltantes. La forma funcional se usa para graficar, pero no se imprime.
 
 #' Print and summarise a SpatFD object
 #'
 #' `print()` shows the coordinates and principal component scores of every
-#' site. `summary()` shows, for each variable, the basis type, the number of
-#' principal components and the proportion of variance they explain, followed
-#' by the summary table of the registered models, if any.
+#' site. `summary()` shows the basis type, the number of principal components
+#' and the proportion of variance they explain, followed by the percentage of
+#' missing values of the sites that have any.
 #'
 #' @param x,object An object of class `SpatFD`, as returned by [spatfd()].
 #' @param ... Ignored.
 #'
 #' @return `print()` returns `x` invisibly. `summary()` returns an object of
-#'   class `summary.SpatFD`: a list with the tables `variance` and `models`.
+#'   class `summary.SpatFD`: a list with the elements `variance` and
+#'   `missing`.
 #'
 #' @name SpatFD-print
 #' @export
@@ -27,7 +28,7 @@ print.SpatFD <- function(x, ...){
 #' @rdname SpatFD-print
 #' @export
 summary.SpatFD <- function(object, ...){
-  structure(list(variance = object$variance, models = object$models),
+  structure(list(variance = object$variance, missing = object$missing),
             class = 'summary.SpatFD')
 }
 
@@ -38,9 +39,11 @@ print.summary.SpatFD <- function(x, ...){
   print(x$variance)
   cat('------------------------------------\n')
 
-  if (nrow(x$models) > 0){
-    cat('\n------------- Models ---------------\n')
-    print(x$models)
+  # Solo se listan los sitios con faltantes
+  missing <- x$missing[x$missing > 0]
+  if (length(missing) > 0){
+    cat('\n------ Missing values (%) ----------\n')
+    print(round(missing, 2))
     cat('------------------------------------\n')
   }
   invisible(x)
@@ -48,13 +51,11 @@ print.summary.SpatFD <- function(x, ...){
 
 #' Plot a SpatFD object
 #'
-#' Plots one of the functional variables stored in a `SpatFD` object, either
-#' as smoothed curves or through its functional principal components. The
-#' plotting itself is delegated to the methods of the \pkg{fda} package.
+#' Plots the functional variable of a `SpatFD` object, either as smoothed
+#' curves or through its functional principal components. The plotting itself
+#' is delegated to the methods of the \pkg{fda} package.
 #'
 #' @param x An object of class `SpatFD`, as returned by [spatfd()].
-#' @param variable Name of the variable to plot. Defaults to the first
-#'   variable of the object, see [var_names()].
 #' @param mode Either `"functional"` to plot the smoothed curves or `"pca"` to
 #'   plot the principal components, all of them on one page.
 #' @param multiple Only for `mode = "functional"`: if `TRUE`, one curve per
@@ -62,6 +63,10 @@ print.summary.SpatFD <- function(x, ...){
 #' @param ... Further arguments passed to the \pkg{fda} plot method.
 #'
 #' @details
+#' The horizontal axis is the time used in the smoothing: the times of `dat`
+#' when they are numbers, and days since 1970-01-01 when they are dates, see
+#' [spatfd()].
+#'
 #' No plot of the package asks for `<Enter>` before drawing, even if the
 #' graphics device was left in that mode (`par(ask = TRUE)`); the setting of
 #' the device is restored afterwards. The only exception is
@@ -71,26 +76,17 @@ print.summary.SpatFD <- function(x, ...){
 #'
 #' @examples
 #' set.seed(1)
-#' t <- 1:50
-#' dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(50, sd = 0.1))
+#' dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * (1:50) / 50) + rnorm(50, sd = 0.1))
 #' colnames(dat) <- paste0("s", 1:10)
 #' coords <- cbind(x = runif(10), y = runif(10))
 #' rownames(coords) <- colnames(dat)
 #' sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
 #'
 #' plot(sfd)
+#' plot(sfd, mode = "pca")
 #'
 #' @export
-plot.SpatFD <- function(x, variable = NULL, mode = 'functional', multiple = F, ...){
-
-  if (is.null(variable)) {
-    variable <- var_names(x)[1]
-    message('Plotting the variable ', variable)
-  }
-
-  if (!(variable %in% var_names(x))){
-    stop('Variable ', variable, ' is not registered in the object ', deparse(substitute(x)), call. = F)
-  }
+plot.SpatFD <- function(x, mode = 'functional', multiple = F, ...){
 
   # El gráfico no pide <Enter>, aunque el dispositivo esté en modo 'ask'. Solo
   # lo pide si el usuario lo solicita con multiple = TRUE (una curva por página).
@@ -98,8 +94,8 @@ plot.SpatFD <- function(x, variable = NULL, mode = 'functional', multiple = F, .
   on.exit(par(old), add = TRUE)
 
   switch(mode,
-         'functional' = plot(get_fd(x, variable), ask = multiple, ...),
-         'pca'        = plot_components(get_pca(x, variable), ...),
+         'functional' = plot(get_fd(x), ask = multiple, ...),
+         'pca'        = plot_components(get_pca(x), ...),
          stop("'mode' must be the string 'functional' or the string 'pca'", call. = F))
 
   invisible(x)
@@ -119,28 +115,4 @@ plot_components <- function(pca, ...){
   }
 
   for (k in seq_len(K)) plot(pca, harm = k, ...)
-}
-
-#' Names of the functional variables stored in an object
-#'
-#' @param x An object of class `SpatFD`, as returned by [spatfd()].
-#'
-#' @return A character vector with the names of the variables, in alphabetical
-#'   order.
-#'
-#' @examples
-#' set.seed(1)
-#' t <- 1:50
-#' dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(50, sd = 0.1))
-#' colnames(dat) <- paste0("s", 1:10)
-#' coords <- cbind(x = runif(10), y = runif(10))
-#' rownames(coords) <- colnames(dat)
-#' sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
-#'
-#' var_names(sfd)
-#'
-#' @export
-var_names <- function(x) {
-  stopifnot('function only available for SpatFD objects' = inherits(x, 'SpatFD'))
-  sort(names(attr(x, 'internal')$variables))
 }

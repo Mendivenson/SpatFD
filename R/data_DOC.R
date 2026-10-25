@@ -29,14 +29,16 @@
 #' @examples
 #' data(air_mexico)
 #'
-#' pm10 <- spatfd(pm10_mexico, coords = as.matrix(coords_pm10_mexico),
+#' # The data have no column of times: the rows are taken as equally spaced
+#' pm10 <- spatfd(pm10_mexico, coords = coords_pm10_mexico,
 #'                basis = "fourier", nbasis = 21, lambda = 0.000001,
 #'                nharm = 2, name = "PM10")
-#' no2  <- spatfd(no2_mexico, coords = as.matrix(coords_no2_mexico),
+#' no2  <- spatfd(no2_mexico, coords = coords_no2_mexico,
 #'                basis = "fourier", nbasis = 21, lambda = 0.000001,
 #'                nharm = 2, name = "NO2")
 #'
-#' summary(pm10 + no2)
+#' summary(pm10)
+#' summary(no2)
 #'
 #' @docType data
 #' @keywords datasets
@@ -71,11 +73,12 @@ NULL
 #' @examples
 #' data(air_bogota)
 #'
-#' # spatfd() matches the columns of the data with the row names of the coordinates
-#' coords <- as.matrix(coords_bogota[, c("X", "Y")])
-#' rownames(coords) <- colnames(pm10_bogota)
+#' # The names in ESTACION do not match the columns of the data, so the sites
+#' # are identified by position
+#' coords <- coords_bogota
+#' coords$ESTACION <- colnames(pm10_bogota)
 #'
-#' sfd <- spatfd(as.matrix(pm10_bogota), coords = coords,
+#' sfd <- spatfd(pm10_bogota, coords = coords, id = "ESTACION",
 #'               basis = "bsplines", nbasis = 91, nharm = 3, name = "PM10")
 #' summary(sfd)
 #'

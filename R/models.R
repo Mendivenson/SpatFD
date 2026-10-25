@@ -54,7 +54,7 @@
 #' *Computers & Geosciences*, 30, 683-691. \doi{10.1016/j.cageo.2004.03.012}
 #'
 #' @seealso [availablemodels()] to list or plot the models, and
-#'   [add_model()] to register models built from them in a `SpatFD` object.
+#'   [spatfd_model()] to build a model from a data frame of them.
 #'
 #' @examples
 #' names(models)

@@ -1,103 +1,107 @@
-# ============================= FUNCIONES INTERNAS =============================
-# Todo lo funcional del objeto (curvas suavizadas, componentes principales,
-# datos originales y modelos compilados) vive en un único atributo oculto,
-# 'internal', que es una lista normal:
+# ======================= FUNCIONES INTERNAS COMPARTIDAS =======================
+# Todo lo funcional del objeto (datos originales, curvas suavizadas y
+# componentes principales) vive en un único atributo oculto, 'internal', que es
+# una lista normal:
 #
-#   coords    -> Coordenadas de todos los sitios del objeto
-#   variables -> Una entrada por variable con: data, fd, pca y args
-#   models    -> Una entrada por modelo con: table, variograms y sills
+#   coords -> Coordenadas de los sitios con datos
+#   data   -> Matriz de datos (una fila por tiempo, una columna por sitio)
+#   time   -> Tiempos tal como los dio el usuario (números o fechas)
+#   t      -> Tiempos numéricos usados en el suavizamiento, ver spatfd_UTILS.R
+#   fd     -> Curvas suavizadas, salida de fda
+#   pca    -> Componentes principales, salida de fda::pca.fd()
+#   args   -> Argumentos del suavizamiento, para poder repetirlo
 #
 # El resto del paquete accede a él solo a través de estas funciones, así que
 # el usuario nunca tiene que manipular objetos del paquete fda.
 
-# CONSTRUCTOR: Arma el objeto a partir de sus partes. La tabla de modelos que
-# ve el usuario se calcula aquí, así que nunca queda desactualizada.
-new_spatfd <- function(scores, variance, coords, variables, models = list()){
-  sfd <- structure(list(scores = scores, variance = variance, models = NULL),
-                   class = 'SpatFD',
-                   internal = list(coords = coords, variables = variables, models = models))
-  sfd$models <- model_table(sfd)
-  sfd
+# CONSTRUCTOR: Arma el objeto a partir de sus partes. El nombre de la variable
+# queda en su propio atributo, visible, para nombrar gráficos y modelos.
+new_spatfd <- function(scores, variance, missing, internal, name){
+  structure(list(scores = scores, variance = variance, missing = missing),
+            class    = 'SpatFD',
+            name     = name,
+            internal = internal)
 }
 
 # ACCESORES
-get_coords   <- function(sfd) attr(sfd, 'internal')$coords
-get_variable <- function(sfd, variable) attr(sfd, 'internal')$variables[[variable]]
-get_fd       <- function(sfd, variable) get_variable(sfd, variable)$fd
-get_pca      <- function(sfd, variable) get_variable(sfd, variable)$pca
-get_models   <- function(sfd) attr(sfd, 'internal')$models
+get_name     <- function(sfd) attr(sfd, 'name')
+get_internal <- function(sfd, what) attr(sfd, 'internal')[[what]]
+get_coords   <- function(sfd) get_internal(sfd, 'coords')
+get_fd       <- function(sfd) get_internal(sfd, 'fd')
+get_pca      <- function(sfd) get_internal(sfd, 'pca')
 
-# MODIFICADORES: Devuelven el objeto modificado, nunca lo cambian en el sitio
-set_pca <- function(sfd, variable, pca){
-  internal <- attr(sfd, 'internal')
-  internal$variables[[variable]]$pca <- pca
-  attr(sfd, 'internal') <- internal
-  sfd
+# TIEMPOS EN DÍAS: Las fechas se pasan a días desde 1970-01-01, con la hora
+# como fracción del día (como en Excel, con otro origen). Siempre en UTC: así
+# los tiempos crecen siempre, sin horas repetidas ni saltadas por el cambio de
+# horario, y un objeto con fechas y otro con fecha y hora quedan en el mismo
+# eje (una fecha es las 00:00 UTC de ese día). Es solo para los cálculos: el
+# usuario sigue viendo sus tiempos tal cual. Los números se usan tal cual.
+as_days <- function(time){
+  if (inherits(time, 'Date'))   return(as.numeric(time))
+  if (inherits(time, 'POSIXt')) return(as.numeric(as.POSIXct(time)) / 86400)
+  time
 }
 
-set_models <- function(sfd, models){
-  internal <- attr(sfd, 'internal')
-  internal$models <- models
-  attr(sfd, 'internal') <- internal
-  sfd$models <- model_table(sfd)
-  sfd
+# DE DÍAS A TIEMPOS DEL USUARIO: La inversa de as_days(), con la clase (y la
+# zona horaria) de los tiempos de 'template'
+from_days <- function(days, template){
+  if (inherits(template, 'Date'))   return(as.Date(days, origin = '1970-01-01'))
+  if (inherits(template, 'POSIXt')) {
+    tz <- attr(as.POSIXct(template), 'tzone')
+    return(as.POSIXct(days * 86400, origin = '1970-01-01', tz = if (is.null(tz)) '' else tz[1]))
+  }
+  days
 }
 
-# SCORES DEL OBJETO: Vector con la variable a la que pertenece cada score,
-# nombrado con el id del score (<variable>.PC1, <variable>.PC2, ...)
-score_ids <- function(sfd){
-  variables <- var_names(sfd)
-  ids <- lapply(variables, function(v) {
-    paste0(v, '.PC', seq_len(ncol(get_pca(sfd, v)$scores)))
-  })
-  stats::setNames(rep(variables, lengths(ids)), unlist(ids))
+# CELDAS DE UNA GRILLA REGULAR: Los sitios de una predicción sobre un mapa
+# forman una grilla regular. Para dibujarla como imagen se necesitan sus
+# coordenadas x e y distintas y una matriz con un valor por celda (filas = y,
+# columnas = x), con NA fuera del mapa. 'fill' pasa los valores de los sitios a
+# esa matriz.
+grid_cells <- function(grid){
+  step <- function(v) {
+    values <- sort(unique(signif(v, 8)))
+    if (length(values) > 1) min(diff(values)) else 1
+  }
+  dx <- step(grid[, 1])
+  dy <- step(grid[, 2])
+  ix <- round((grid[, 1] - min(grid[, 1])) / dx) + 1
+  iy <- round((grid[, 2] - min(grid[, 2])) / dy) + 1
+
+  list(x    = min(grid[, 1]) + dx * (seq_len(max(ix)) - 1),
+       y    = min(grid[, 2]) + dy * (seq_len(max(iy)) - 1),
+       fill = function(values) {
+         z <- matrix(NA_real_, max(iy), max(ix))
+         z[cbind(iy, ix)] <- values
+         z
+       })
 }
 
-# NOMBRES SECUENCIALES: model 1, model 2, ... saltando los nombres ya usados
-next_model_name <- function(used){
-  k <- length(used) + 1
-  while (paste('model', k) %in% used) k <- k + 1
-  paste('model', k)
-}
+# VARIOS OBJETOS SpatFD: Revisa los objetos dados en '...' (por to_gstat() y
+# spatfd_model()) y los devuelve en una lista nombrada con el nombre de cada
+# variable. Los nombres deben ser distintos: forman los ids de los scores.
+spatfd_list <- function(...){
+  objects <- list(...)
 
-# TABLA RESUMEN DE LOS MODELOS REGISTRADOS: Es lo que el usuario ve en sfd$models
-model_table <- function(sfd){
-  ids     <- score_ids(sfd)
-  entries <- get_models(sfd)
+  stopifnot(
+    "At least one SpatFD object must be given" = length(objects) > 0,
+    "All the objects in '...' must be of class SpatFD" = all(vapply(objects, inherits, logical(1), what = 'SpatFD'))
+  )
 
-  if (length(entries) == 0) {
-    return(data.frame('variables' = character(0), 'structures' = character(0),
-                      'no. scores' = integer(0), 'cross' = logical(0),
-                      'sill' = numeric(0), check.names = F))
+  names(objects) <- vapply(objects, get_name, character(1))
+  repeated <- unique(names(objects)[duplicated(names(objects))])
+  if (length(repeated) > 0) {
+    stop("Several objects are named ", paste0("'", repeated, "'", collapse = ', '),
+         ". Give them different names with the argument 'name' of spatfd()", call. = F)
   }
 
-  rows <- lapply(entries, function(m) {
-    direct <- intersect(names(ids), m$table$var)
-    data.frame('variables'  = paste(unique(ids[direct]), collapse = ', '),
-               'structures' = paste(unique(m$table$model), collapse = ', '),
-               'no. scores' = length(direct),
-               'cross'      = !all(m$table$var %in% names(ids)),
-               'sill'       = sum(m$sills[direct]),
-               check.names = F)
-  })
+  # Todas las variables deben estar en el mismo sistema de coordenadas
+  coord_names <- lapply(objects, function(sfd) colnames(get_coords(sfd)))
+  if (!all(vapply(coord_names, identical, logical(1), coord_names[[1]]))) {
+    stop("The coordinates of all the objects must have the same column names", call. = F)
+  }
 
-  rows <- do.call(rbind, rows)
-  rownames(rows) <- names(entries)
-  rows
-}
-
-# TABLA DE MODELOS PARA LOS MENSAJES DE ERROR
-models_message <- function(sfd){
-  paste(utils::capture.output(print(sfd$models)), collapse = '\n')
-}
-
-# CURVAS EVALUADAS: Matriz con una fila por tiempo y una columna por curva. Es
-# la forma en que el usuario recibe las curvas, igual a la de los datos que
-# entregó a spatfd().
-evaluate_curves <- function(fd, t){
-  values <- fda::eval.fd(t, fd)
-  dimnames(values) <- list(t, colnames(fd$coefs))
-  values
+  objects
 }
 
 # PRODUCTOS INTERNOS ENTRE CURVAS: Matriz con <f1_i, f2_j> integrado sobre

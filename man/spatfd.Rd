@@ -7,7 +7,8 @@
 spatfd(
   dat,
   coords,
-  t = 1:nrow(dat),
+  time = "time",
+  id = NULL,
   basis = "bsplines",
   nbasis = 91,
   lambda = 2e-04,
@@ -17,14 +18,23 @@ spatfd(
 )
 }
 \arguments{
-\item{dat}{Numeric matrix of observations. Each column is a site (station)
-and each row is a measurement time. Column names identify the sites.}
+\item{dat}{Data frame or numeric matrix of observations. Each row is a
+measurement time and each column a site (station), except for the column
+\code{time}. Column names identify the sites. Missing values are allowed, see
+Details.}
 
-\item{coords}{Numeric matrix of site coordinates. Row names must contain the
-column names of \code{dat}.}
+\item{coords}{Data frame or numeric matrix with the coordinates of the
+sites, one row per site. The sites are identified by the column \code{id} or,
+when \code{id} is \code{NULL}, by the row names.}
 
-\item{t}{Numeric vector with the times at which the rows of \code{dat} were
-measured. Must have unique values and length \code{nrow(dat)}.}
+\item{time}{Name of the column of \code{dat} with the time of each row: numbers,
+dates (\code{Date}) or dates and times (\code{POSIXct}). If \code{dat} has no such
+column, the rows are taken as equally spaced times \verb{1, ..., n} in their
+current order, and a message says so.}
+
+\item{id}{Name of the column of \code{coords} that identifies the sites, or
+\code{NULL} to use the row names of \code{coords}. Two sites cannot have the same
+coordinates.}
 
 \item{basis}{Basis used for smoothing, either \code{"bsplines"} or \code{"fourier"}.}
 
@@ -40,8 +50,9 @@ smallest number of principal components whose cumulative explained
 variance exceeds \code{var} is kept. If that proportion is not reached with
 \code{nharm} components, \code{nharm} components are kept and a message is shown.}
 
-\item{name}{Name of the functional variable. Defaults to the expression
-passed as \code{dat}.}
+\item{name}{Name of the functional variable. Defaults to the name of the
+object passed as \code{dat} (or the expression, if it is not a single
+object). It is kept in the attribute \code{name} and used to name the scores.}
 }
 \value{
 An object of class \code{SpatFD}: a list with the elements
@@ -49,62 +60,102 @@ An object of class \code{SpatFD}: a list with the elements
 \item{\code{scores}}{Matrix with one row per site, containing the coordinates
 followed by the principal component scores. Score columns are named
 \verb{<name>.PC1}, \verb{<name>.PC2}, ...}
-\item{\code{variance}}{Data frame with one row per variable: basis type,
-number of principal components and proportion of explained variance.}
-\item{\code{models}}{Summary table of the variogram models registered in the
-object, one row per model. It is empty until a model is added with
-\code{\link[=add_model]{add_model()}}.}
+\item{\code{variance}}{Data frame with one row, named after the variable:
+basis type, number of principal components and proportion of
+explained variance.}
+\item{\code{missing}}{Named vector with the percentage of missing values of
+each site, over the rows kept.}
 }
+The name of the variable is kept in the attribute \code{name}:
+\code{attr(x, "name")}.
 }
 \description{
-Wraps the core functional data workflow of the \pkg{fda} package
-(basis smoothing followed by functional principal component analysis) into a
-single object of class \code{SpatFD}. The scores of the principal components are
-the quantities that are later modelled spatially.
+Wraps the core functional data workflow of the \pkg{fda} package (basis
+smoothing followed by functional principal component analysis) into a
+single object of class \code{SpatFD}, for one functional variable. The scores of
+the principal components are the quantities that are later modelled
+spatially.
 }
 \details{
+\strong{Times.} Each row of \code{dat} is taken as measured at the time in its
+\code{time} column, so the rows can come in any order: they are sorted by time.
+For the smoothing, dates are converted to days since 1970-01-01 UTC, with
+the time of day as a fraction of the day: a date is 00:00 UTC of that day.
+Using UTC keeps the times increasing, with no hour repeated or skipped by
+daylight saving time, and puts a variable with dates and one with dates
+and times on the same axis. The times kept in the object are the ones
+given, in their own time zone. Numeric times are used as they are, so different
+variables must use the same scale. The unit matters for the smoothing: the
+same \code{lambda} smooths differently in days than in hours.
+
+\strong{Missing values.} Every curve is smoothed with all its available
+observations: a site with missing values is smoothed on its own, over the
+times where it was observed. Sites with no observations at all are
+removed, with a message, and a warning lists the sites with more than 10\%
+of missing values. The 10\% threshold is a heuristic: how well a curve is
+recovered depends on how many observations are left compared with
+\code{nbasis}, and on how they are spread (a long gap is worse than scattered
+missing values). Rows with no observation at any site are dropped. The
+percentage of missing values of each site is kept in the element
+\code{missing}.
+
 The functional representation of the data (smoothed curves and principal
 components) is kept inside the object, hidden from the user: it is used by
-\link[=plot.SpatFD]{plot()}, \link[=predict.SpatFD]{predict()} and \code{\link[=leave_one_out]{leave_one_out()}},
-which always return plain matrices and data frames.
+\link[=plot.SpatFD]{plot()}.
 }
 \section{Theory}{
 
 Each column of \code{dat} is a curve \eqn{\chi_{s_i}(t)} observed at a finite
 set of points. It is first smoothed with \code{nbasis} basis functions
-\eqn{B_l(t)}, by penalised least squares with smoothing parameter \code{lambda}:
+\eqn{B_l(t)}:
 \deqn{\chi_{s_i}(t) \approx \sum_{l=1}^{p} c_{il} B_l(t)}
-The smoothed curves are then represented with their first \eqn{K}
-functional principal components (Karhunen-Loève expansion):
+The coefficients minimise the penalised least squares criterion
+\deqn{\sum_{j} \left( y_{ij} - \chi_{s_i}(t_j) \right)^2 +
+  \lambda \int_T \left( \chi_{s_i}''(t) \right)^2 dt}
+over the times \eqn{t_j} where the site was observed, so the curves do not
+need to share their times. The smoothed curves are then represented with
+their first \eqn{K} functional principal components (Karhunen-Loève
+expansion):
 \deqn{\chi_s(t) \approx \mu(t) + \sum_{k=1}^{K} f_k(s) \xi_k(t)}
 The eigenfunctions \eqn{\xi_k(t)} are common to all sites, so the spatial
 information is carried by the scores \eqn{f_k(s_i)}. These are the values
-stored in \code{scores}, and the ones modelled spatially afterwards (Bohorquez,
-Giraldo and Mateu, 2016). \eqn{K} is set by \code{nharm} or chosen from \code{var}.
-See \link{SpatFD-package} for the complete picture.
+stored in \code{scores}. \eqn{K} is set by \code{nharm} or chosen from \code{var}.
 }
 
 \examples{
 set.seed(1)
-t <- 1:50
-dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(50, sd = 0.1))
-colnames(dat) <- paste0("s", 1:10)
-coords <- cbind(x = runif(10), y = runif(10))
-rownames(coords) <- colnames(dat)
+dat <- data.frame(time = as.Date("2026-01-01") + 0:49)
+for (s in paste0("s", 1:10)) {
+  dat[[s]] <- rnorm(1, 5) * sin(2 * pi * (1:50) / 50) + rnorm(50, sd = 0.1)
+}
+coords <- data.frame(station = paste0("s", 1:10), x = runif(10), y = runif(10))
 
-sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
+sfd <- spatfd(dat, coords, id = "station", basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
 sfd
 summary(sfd)
 
 }
 \references{
-Bohorquez, M., Giraldo, R. and Mateu, J. (2016). Optimal sampling for
+Bohórquez, M. P. (2025). \emph{Geoestadística para datos espaciales,
+espacio-temporales y funcionales} (1st ed.). Bogotá: Editorial UNAL.
+ISBN 978-628-503-048-2.
+
+Bohórquez, M., Giraldo, R. and Mateu, J. (2016). Optimal sampling for
 spatial prediction of functional data. \emph{Statistical Methods &
 Applications}, 25(1), 39-54. \doi{10.1007/s10260-015-0340-9}
 
-Ramsay, J. O. and Silverman, B. W. (2005). \emph{Functional Data Analysis}
-(2nd ed.). Springer. \doi{10.1007/b98888}
+Bohórquez, M., Giraldo, R. and Mateu, J. (2017). Multivariate functional
+random fields: prediction and optimal sampling. \emph{Stochastic Environmental
+Research and Risk Assessment}, 31, 53-70. \doi{10.1007/s00477-016-1266-y}
+
+Horváth, L. and Kokoszka, P. (2012). \emph{Inference for Functional Data with
+Applications}. Springer Series in Statistics. Springer.
+\doi{10.1007/978-1-4614-3655-3}
+
+Ramsay, J. (2005). Functional Data Analysis. In B. S. Everitt and D. C.
+Howell (eds.), \emph{Encyclopedia of Statistics in Behavioral Science}.
+\doi{10.1002/0470013192.bsa239}
 }
 \seealso{
-\code{\link[=var_names]{var_names()}}, \code{\link[=togstat]{togstat()}}, \code{\link{+.SpatFD}}
+\link[=plot.SpatFD]{plot()}, \link[=SpatFD-print]{summary()}
 }

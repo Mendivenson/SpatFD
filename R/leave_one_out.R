@@ -1,265 +1,167 @@
-# ============================== leave_one_out() ===============================
+# =============================== leave_one_out() ==============================
 
-#' Leave-one-out cross-validation of models and prediction methods
+#' Leave-one-out cross-validation of spatial functional models
 #'
-#' Compares variogram models and prediction methods by leave-one-out
-#' cross-validation. Each site of a variable is left out in turn, its curve is
-#' predicted from the remaining sites with [predict()][predict.SpatFD], and
-#' the prediction is compared with the curve that was observed there.
+#' Compares models and prediction methods by leave-one-out cross-validation.
+#' Each site of a variable is left out in turn, its curve is predicted from
+#' the remaining sites with [predict()][predict.SpatFDmodel], and the
+#' prediction is compared with the curve observed there.
 #'
-#' @param sfd An object of class `SpatFD` with at least one model registered,
-#'   see [add_model()].
-#' @param design Data frame with the combinations to compare, one per row,
-#'   with the columns `model` (name of a model registered in `sfd`) and
-#'   `method` (`"scores"` or `"lambda"`). By default, every model that covers
-#'   the variable is combined with every method it can be used with.
-#' @param variable Name of the variable whose curves are predicted. Defaults
-#'   to the first variable of the object, see [var_names()].
-#' @param kriging Type of kriging used in every combination: `"ordinary"` (the
-#'   default) or `"simple"`, see [predict()][predict.SpatFD]. With
-#'   `"simple"`, the default design leaves out the models without a sill.
+#' @param ... Objects of class `SpatFDmodel`, as returned by [spatfd_model()].
+#'   They are labelled with the names of their arguments
+#'   (`leave_one_out(a, other = b)`) or, without a name, with the expression
+#'   given.
+#' @param variable Character vector with the names of the variables to
+#'   validate. Defaults to every variable of the models. A model is only
+#'   validated on the variables it has.
+#' @param method Prediction methods to compare: `"scores"`, `"lambda"` or
+#'   both (the default). See [predict()][predict.SpatFDmodel].
 #'
 #' @details
-#' For every site left out, the whole analysis of the variable is repeated
-#' without it, with the same arguments given to [spatfd()] and the same number
-#' of principal components: the curve left out takes no part in the mean
-#' function or in the principal components used to predict it. The variogram
-#' models are **not** fitted again; they are the ones registered in `sfd`.
+#' **What is repeated for each site.** The whole analysis of the variable is
+#' repeated without the site, with the same data, times and arguments given
+#' to [spatfd()] and the same number of components of the model, so the curve
+#' left out takes no part in the mean or in the components used to predict
+#' it. The components obtained without the site are given the sign of the
+#' ones of the whole analysis, so that the cross-variograms keep their
+#' meaning. The variogram models are **not** fitted again: they are the ones
+#' of the model. The other variables of the model keep their observation at
+#' that site.
 #'
-#' The principal components obtained without a site are given the same sign
-#' as the ones of the full analysis, so that the cross-variograms of a model
-#' keep their meaning.
+#' **The error of a site.** The error of the prediction at a site is a curve
+#' in time, \eqn{e(t) = \chi(t) - \hat\chi(t)}, the difference between the
+#' observed (smoothed) curve and the predicted one: at each time, how far the
+#' prediction was. It is summarised in a single number, the root mean square
+#' error over time,
+#' \deqn{RMSE = \sqrt{\frac{1}{|T|} \int_T e(t)^2 \, dt}}
+#' computed as the mean over the times of the data (exactly the integral
+#' when they are equally spaced). It is in the units of the data: a typical
+#' distance between the predicted and the observed curve along the interval.
+#' The predicted curves are kept in `pred`, so the error curves can be drawn.
 #'
-#' With a model that covers several variables (cokriging), only the curve of
-#' `variable` is left out: the other variables keep their observation at that
-#' site, when they have one. Both methods use every variable of the model.
-#'
-#' With the method `"lambda"` and variables observed over different time
-#' intervals, the curves are predicted, and the errors measured, only over the
-#' common interval (see [predict()][predict.SpatFD]). Those errors are then
-#' not directly comparable with the ones of the method `"scores"`.
+#' **Method `"lambda"` with several variables.** The curves of several
+#' variables can only be combined over the times they share, so the method
+#' `"lambda"` predicts, and its error is measured, only over the time
+#' interval common to the variables of the model. When the variables span
+#' different intervals, those errors are not directly comparable with the
+#' ones of the method `"scores"`, which uses the whole interval of the
+#' variable.
 #'
 #' @return An object of class `SpatFDloo`: a list with
 #' \describe{
-#'   \item{`summary`}{Data frame with one row per combination, from the
-#'     smallest to the largest mean error: `model`, `method`, `crossed`
-#'     (whether cross-variograms were used), `mean` and `sd` (mean and
-#'     standard deviation of the errors over the sites) and `max` (largest
-#'     error).}
-#'   \item{`errors`}{Matrix with the error of every site (rows) for every
-#'     combination (columns).}
-#'   \item{`pred`}{List with the curves predicted for every combination, as a
-#'     matrix with one row per time of the observed data and one column per
-#'     site, the same layout as the data given to [spatfd()].}
+#'   \item{`summary`}{List with one table per variable, with one row per
+#'     model and method: the `mean`, standard deviation (`sd`) and maximum
+#'     (`max`) of the errors of the sites, from the smallest to the largest
+#'     mean error.}
+#'   \item{`errors`}{List with one table per variable, with the error of
+#'     every site for every model and method.}
+#'   \item{`pred`}{List with one element per variable and, inside, one per
+#'     model and method (`<model>.<method>`): the curves predicted at each site
+#'     when it was left out, with one row per time and one column per site.}
 #' }
 #'
-#' @section Theory:
-#' The error at the site \eqn{s_i} is the distance between the observed
-#' (smoothed) curve and the curve predicted without it,
-#' \deqn{\| \chi_{s_i} - \hat{\chi}_{s_i}^{(-i)} \| = \left( \int_T \left(
-#'   \chi_{s_i}(t) - \hat{\chi}_{s_i}^{(-i)}(t) \right)^2 dt \right)^{1/2}}
-#' A combination of model and method predicts better the smaller its mean
-#' error is (Bohorquez, Giraldo and Mateu, 2017).
-#'
 #' @references
-#' Bohorquez, M., Giraldo, R. and Mateu, J. (2017). Multivariate functional
+#' Bohórquez, M., Giraldo, R. and Mateu, J. (2017). Multivariate functional
 #' random fields: prediction and optimal sampling. *Stochastic Environmental
 #' Research and Risk Assessment*, 31, 53-70. \doi{10.1007/s00477-016-1266-y}
 #'
-#' @seealso [add_model()], [predict()][predict.SpatFD]
+#' @seealso [spatfd_model()], [predict()][predict.SpatFDmodel]
 #'
 #' @examples
 #' set.seed(1)
-#' t <- 1:50
-#' dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * t / 50) + rnorm(50, sd = 0.1))
+#' dat <- sapply(1:10, function(i) rnorm(1, 5) * sin(2 * pi * (1:50) / 50) + rnorm(50, sd = 0.1))
 #' colnames(dat) <- paste0("s", 1:10)
 #' coords <- cbind(x = runif(10), y = runif(10))
 #' rownames(coords) <- colnames(dat)
-#' sfd <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
+#' sim <- spatfd(dat, coords, basis = "fourier", nbasis = 11, nharm = 2, name = "sim")
 #'
-#' sfd <- add_model(sfd, list(
-#'   "sim.PC1" = gstat::vgm(psill = 30, model = "Exp", range = 0.5),
-#'   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Exp", range = 0.5)
-#' ), name = "exponential")
-#' sfd <- add_model(sfd, list(
-#'   "sim.PC1" = gstat::vgm(psill = 30, model = "Sph", range = 0.8),
-#'   "sim.PC2" = gstat::vgm(psill = 0.01, model = "Sph", range = 0.8)
-#' ), name = "spherical")
+#' exponential <- spatfd_model(sim, model = data.frame(var = c("sim.PC1", "sim.PC2"),
+#'                                                     model = "exponential", rango = 0.5,
+#'                                                     sigma = c(30, 0.1)))
+#' spherical   <- spatfd_model(sim, model = data.frame(var = c("sim.PC1", "sim.PC2"),
+#'                                                     model = "spherical", rango = 0.8,
+#'                                                     sigma = c(30, 0.1)))
 #'
-#' # Every model with every method
-#' loo <- leave_one_out(sfd)
+#' loo <- leave_one_out(exponential, spherical)
 #' loo
-#'
-#' # Or only some combinations
-#' leave_one_out(sfd, design = data.frame(model  = c("exponential", "spherical"),
-#'                                        method = c("scores", "scores")))
+#' loo$summary$sim
 #'
 #' @export
-leave_one_out <- function(sfd, design = NULL, variable = NULL, kriging = 'ordinary'){
+leave_one_out <- function(...,                                # Modelos, ver spatfd_model()
+                          variable = NULL,                    # Variables que se validan
+                          method = c('scores', 'lambda')){    # Métodos de predicción
 
-  stopifnot('function only available for SpatFD objects' = inherits(sfd, 'SpatFD'),
-            "'kriging' must be a single string" = is.character(kriging) && length(kriging) == 1)
-  kriging <- match.arg(kriging, c('ordinary', 'simple'))
-
-  if (is.null(variable)) {
-    variable <- var_names(sfd)[1]
-    if (length(var_names(sfd)) > 1) message('Cross-validating the variable ', variable)
-  }
+  models <- list(...)
   stopifnot(
-    "'variable' must be the name of one variable of the object" =
-      is.character(variable) && length(variable) == 1 && variable %in% var_names(sfd)
+    "At least one SpatFDmodel object must be given" = length(models) > 0,
+    "All the objects in '...' must be of class SpatFDmodel" =
+      all(vapply(models, inherits, logical(1), what = 'SpatFDmodel')),
+    "'method' must be 'scores', 'lambda' or both" =
+      is.character(method) && length(method) > 0 && all(method %in% c('scores', 'lambda'))
   )
+  labels <- model_labels(models, as.list(substitute(list(...)))[-1])
+  method <- unique(method)
 
-  registry <- get_models(sfd)
-  ids      <- score_ids(sfd)
-  own_ids  <- names(ids)[ids == variable]
-
-  # =========================== COMBINACIONES ==================================
-  # Por defecto: cada modelo que cubre la variable con cada método. Con kriging
-  # simple quedan por fuera los modelos sin meseta.
-  if (is.null(design)) {
-    usable <- vapply(registry, function(m) {
-      all(own_ids %in% names(m$variograms)) &&
-        (kriging == 'ordinary' || !any(m$table$model %in% unbounded_models))
-    }, logical(1))
-    covers <- as.character(names(registry))[usable]
-    design <- data.frame(model  = rep(covers, 2),
-                         method = rep(c('scores', 'lambda'), each = length(covers)))
-  }
-  stopifnot(
-    "'design' must be a data frame with the columns 'model' and 'method'" =
-      is.data.frame(design) && all(c('model', 'method') %in% colnames(design)),
-    "'method' must be 'scores' or 'lambda'" = all(design$method %in% c('scores', 'lambda'))
-  )
-  if (nrow(design) == 0) {
-    stop('There are no combinations to compare: no model covers the variable ', variable,
-         '\nThe models of the object are:\n', models_message(sfd), call. = FALSE)
-  }
-  unknown <- setdiff(design$model, names(registry))
+  # VARIABLES: Todas las de los modelos, en orden de aparición
+  available <- unique(unlist(lapply(models, function(m) names(get_model_data(m)))))
+  if (is.null(variable)) variable <- available
+  unknown <- setdiff(variable, available)
   if (length(unknown) > 0) {
-    stop('Models not found in the object: ', paste(unknown, collapse = ', '),
-         '\nThe models of the object are:\n', models_message(sfd), call. = FALSE)
+    stop('Variables not in the models: ', paste(unknown, collapse = ', '), call. = F)
   }
-  design <- unique(data.frame(model = as.character(design$model), method = as.character(design$method)))
-  labels <- paste(design$model, design$method, sep = ' / ')
 
-  # ============================ PREPARACIÓN ===================================
-  observed <- get_fd(sfd, variable)                               # Curvas observadas (suavizadas)
-  gram     <- fda::eval.penalty(observed$basis, fda::int2Lfd(0))   # Productos internos de la base
-  sites    <- colnames(observed$coefs)
-  times    <- get_variable(sfd, variable)$args$t
-  coords   <- get_coords(sfd)
+  errors <- stats::setNames(vector('list', length(variable)), variable)
+  pred   <- stats::setNames(lapply(variable, function(v) list()), variable)
+  curves <- times <- pred
 
-  # Las demás variables no cambian de un sitio a otro: se reconstruyen una vez
-  others <- lapply(setdiff(var_names(sfd), variable), function(v) refit(sfd, v))
+  for (k in seq_along(models)) {
+    data  <- get_model_data(models[[k]])
+    input <- get_compiled(models[[k]])$input
 
-  errors <- matrix(NA_real_, length(sites), nrow(design), dimnames = list(sites, labels))
-  curves <- lapply(labels, function(l) matrix(NA_real_, length(times), length(sites),
-                                              dimnames = list(times, sites)))
-  names(curves) <- labels
-  crossed <- stats::setNames(logical(nrow(design)), labels)
+    for (v in intersect(variable, names(data))) {
+      copy   <- data[[v]]
+      coords <- get_coords(copy)
 
-  # ========================= VALIDACIÓN CRUZADA ===============================
-  for (site in sites) {
+      for (site in rownames(coords)) {
+        # MODELO SIN EL SITIO: La variable se rehace sin él y el modelo se arma
+        # con los mismos variogramas
+        fold_data      <- data
+        fold_data[[v]] <- refit_without(copy, site)
+        fold <- tryCatch(suppressMessages(do.call(spatfd_model, c(unname(fold_data), list(model = input)))),
+                         error = function(e) {
+                           stop("Without the site '", site, "' of '", v, "': ", conditionMessage(e), call. = F)
+                         })
 
-    # El análisis completo de la variable se repite sin el sitio
-    fold <- Reduce(`+`, c(list(refit(sfd, variable, without = site)), others))
-    for (model in unique(design$model)) fold <- add_model(fold, registry[[model]]$table, name = model)
+        for (m in method) {
+          p <- suppressMessages(predict(fold, coords[site, , drop = F], variable = v, method = m))
 
-    for (k in seq_len(nrow(design))) {
-      # Los dos métodos usan todas las variables que cubre el modelo
-      pred <- suppressMessages(predict(fold, coords[site, , drop = FALSE], model = design$model[k],
-                                       method = design$method[k], kriging = kriging))
-      if (!(variable %in% names(pred))) {
-        stop("The model '", design$model[k], "' does not cover the variable ", variable,
-             call. = FALSE)
+          # Tiempos de la predicción: los de los datos, dentro del intervalo predicho
+          range <- attr(p, 'internal')$pred[[v]]$basis$rangeval
+          t     <- get_internal(fold_data[[v]], 't')
+          t     <- t[t >= range[1] & t <= range[2]]
+
+          # ERROR: La curva de error en el tiempo y su resumen (RMSE)
+          e <- error_curve(get_fd(copy)[which(rownames(coords) == site)], p[[v]]$pred, t)
+          errors[[v]] <- rbind(errors[[v]],
+                               data.frame(site = site, model = labels[k], method = m, error = sqrt(mean(e^2))))
+
+          # Curva predicha y curva de error en el sitio, como una columna más de
+          # su combinación de modelo y método
+          key <- paste(labels[k], m, sep = '.')
+          pred[[v]][[key]]   <- cbind(pred[[v]][[key]], matrix(p[[v]]$pred[, 1], dimnames = list(rownames(p[[v]]$pred), site)))
+          curves[[v]][[key]] <- cbind(curves[[v]][[key]], matrix(e, dimnames = list(NULL, site)))
+          times[[v]][[key]]  <- t
+        }
       }
-
-      # Con lambda y variables en intervalos distintos solo se predice el común
-      curve <- pred[[variable]]$pred
-      curves[[k]][rownames(curve), site] <- curve[, 1]
-      crossed[k] <- attr(pred, 'crossed')
-
-      errors[site, k] <- curve_distance(observed[which(sites == site)], predicted_fd(pred, variable)[1], gram)
     }
   }
 
-  # ============================== RESULTADOS ==================================
-  summary <- data.frame(model   = design$model,
-                        method  = design$method,
-                        crossed = unname(crossed),
-                        mean    = colMeans(errors),
-                        sd      = apply(errors, 2, stats::sd),
-                        max     = apply(errors, 2, max),
-                        row.names = NULL)
-  summary <- summary[order(summary$mean), ]
-  rownames(summary) <- NULL
-
-  structure(list(summary = summary, errors = errors, pred = curves),
-            class = 'SpatFDloo',
-            variable = variable,
-            kriging = kriging)
-}
-
-# FUNCIÓN DE IMPRESIÓN: Solo la tabla de comparación
-
-#' @rdname leave_one_out
-#' @param x An object of class `SpatFDloo`, as returned by `leave_one_out()`.
-#' @param ... Ignored.
-#' @export
-print.SpatFDloo <- function(x, ...){
-  cat('\n\n------ Leave-one-out cross-validation: ', attr(x, 'variable'), ' ------\n', sep = '')
-  cat(nrow(x$errors), ' sites, ', attr(x, 'kriging'), ' kriging, ',
-      'error = distance between the observed and the predicted curve\n\n', sep = '')
-  print(x$summary)
-  cat('------------------------------------------------------\n\n')
-  invisible(x)
-}
-
-# .............................. FUNCIONES INTERNAS ................................................
-
-# DISTANCIA ENTRE DOS CURVAS: Norma L2 de su diferencia, sobre el intervalo de
-# la curva predicha. Si están en la misma base basta con los coeficientes y la
-# matriz de productos internos de la base (gram); si no, se integra.
-curve_distance <- function(observed, predicted, gram){
-  if (identical(observed$basis, predicted$basis)) {
-    difference <- observed$coefs[, 1] - predicted$coefs[, 1]
-    return(sqrt(drop(crossprod(difference, gram %*% difference))))
-  }
-
-  rng <- predicted$basis$rangeval
-  squared <- inner_product(observed, observed, rng) - 2 * inner_product(observed, predicted, rng) +
-    inner_product(predicted, predicted, rng)
-  sqrt(max(0, drop(squared)))
-}
-
-# REPETIR EL ANÁLISIS DE UNA VARIABLE: Vuelve a suavizar y a calcular los
-# componentes principales de una variable con los mismos argumentos de
-# spatfd(), opcionalmente sin uno de sus sitios. Los componentes quedan con el
-# mismo signo que los del análisis original: el signo de un componente es
-# arbitrario, pero los variogramas cruzados de un modelo dependen de él.
-refit <- function(sfd, variable, without = NULL){
-  args     <- get_variable(sfd, variable)$args
-  dat      <- get_variable(sfd, variable)$data
-  original <- get_pca(sfd, variable)
-  scores   <- names(score_ids(sfd))[score_ids(sfd) == variable]
-
-  if (!is.null(without)) dat <- dat[, colnames(dat) != without, drop = FALSE]
-
-  new <- spatfd(dat, get_coords(sfd), t = args$t, basis = args$basis,
-                nbasis = args$nbasis, lambda = args$lambda,
-                nharm = length(scores), name = variable)
-
-  # Signo de cada componente respecto al original, por su producto interno
-  pca   <- get_pca(new, variable)
-  gram  <- fda::eval.penalty(pca$harmonics$basis, fda::int2Lfd(0))
-  signs <- sign(diag(crossprod(pca$harmonics$coefs, gram %*% original$harmonics$coefs)))
-  signs[signs == 0] <- 1
-
-  pca$harmonics$coefs <- sweep(pca$harmonics$coefs, 2, signs, `*`)
-  pca$scores          <- sweep(pca$scores, 2, signs, `*`)
-  new <- set_pca(new, variable, pca)
-
-  new$scores[, scores] <- sweep(new$scores[, scores, drop = FALSE], 2, signs, `*`)
-  new
+  # Las curvas de error solo se usan para graficar, ver plot.SpatFDloo()
+  structure(list(summary = lapply(errors, summary_table), errors = errors, pred = pred),
+            class    = 'SpatFDloo',
+            internal = list(curves = curves, times = times,
+                            template = stats::setNames(lapply(variable, function(v) {
+                              copies <- lapply(models, function(m) get_model_data(m)[[v]])
+                              get_internal(Find(Negate(is.null), copies), 'time')
+                            }), variable)))
 }
